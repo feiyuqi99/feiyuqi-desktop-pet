@@ -11,7 +11,7 @@ from PySide6.QtGui import QActionGroup, QFont, QGuiApplication, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox, QSystemTrayIcon
 
-from .animation import SpriteLibrary
+from .animation import FEET_Y, SpriteLibrary
 from .behavior import Behavior, BehaviorContext
 from .bubble import BubbleManager
 from .companion import Alert, Companion
@@ -23,6 +23,7 @@ from .mood import change, decay, label as mood_label
 from .perception import Perception, PerceptionState, time_band
 from .persona import pet_name
 from .window import PetWindow
+from . import support
 
 ROOT = Path(__file__).resolve().parent.parent
 TRAY_ICON = ROOT / "assets" / "icons" / "tray.png"
@@ -100,6 +101,8 @@ class PetApp(QObject):
         self._pstate = PerceptionState()
         self._falling = False
         self._fall_vy = 0.0
+        self._fall_target = 0.0
+        self._support_check_at = 0.0
 
         self.sprites = SpriteLibrary()
         self.sprites.preload()
@@ -247,7 +250,8 @@ class PetApp(QObject):
                 x = max(geometry.left(), min(x, geometry.right() - self.window.width()))
                 self.window.move(x, self.window.y())
             if self._falling and self.window.isVisible():
-                self._step_fall(geometry, dt, now)
+                self._step_fall(dt, now)
+            self._check_support(now, geometry)
             self.window.apply_state(state)
             if self.window.isVisible():
                 self.bubble.follow(self.window.frameGeometry(), geometry)
@@ -473,23 +477,57 @@ class PetApp(QObject):
             self.config.mood = change(self.config.mood, -2)
             self.config.mood_updated_at = now
         geometry = self._screen_geometry()
-        bottom = self.window.y() + self.window.height() - 1
-        if bottom < geometry.bottom() - 30 and abs(speed) < 2200:
-            self._falling = True
-            self._fall_vy = 0.0
-            self.behavior.start_fall(now)
+        feet = self.window.y() + FEET_Y
+        floor_feet = self._feet_floor(geometry)
+        if abs(speed) < 2200:
+            center = self.window.x() + self.window.width() // 2
+            top = support.support_at(center, feet, self._exclude_hwnds())
+            if top is not None:
+                self.window.move(self.window.x(), int(round(top - FEET_Y)))
+                self._falling = False
+                self._fall_vy = 0.0
+                self.behavior.land(now)
+            else:
+                surface = self._surface_below(feet, floor_feet)
+                target = floor_feet if surface is None else float(surface)
+                if target > feet + 6:
+                    self._falling = True
+                    self._fall_vy = 0.0
+                    self._fall_target = target
+                    self.behavior.start_fall(now)
+        self._support_check_at = now + 0.4
         ctx = self._context(now)
         for action in self.behavior.drain():
             if action.kind == "speak":
                 self._speak(action.event, ctx)
         self._save_state()
 
-    def _step_fall(self, geometry, dt: float, now: float) -> None:
+    def _feet_floor(self, geometry) -> float:
+        return geometry.bottom() - (self.window.height() - FEET_Y) + 1
+
+    def _exclude_hwnds(self) -> frozenset[int]:
+        handles = {int(self.window.winId())}
+        if self.bubble.bubble.isVisible():
+            handles.add(int(self.bubble.bubble.winId()))
+        return frozenset(handles)
+
+    def _surface_below(self, feet: float, floor_feet: float) -> int | None:
+        center = self.window.x() + self.window.width() // 2
+        return support.surface_below(center, feet + 1, floor_feet, self._exclude_hwnds())
+
+    def _begin_fall(self, now: float, feet: float, floor_feet: float) -> None:
+        surface = self._surface_below(feet, floor_feet)
+        self._fall_target = floor_feet if surface is None else float(surface)
+        self._falling = True
+        self._fall_vy = 0.0
+        self.behavior.start_fall(now)
+
+    def _step_fall(self, dt: float, now: float) -> None:
         self._fall_vy = min(1500.0, self._fall_vy + 2200.0 * dt)
         y = self.window.y() + self._fall_vy * dt
-        floor = geometry.bottom() - self.window.height() + 1
-        if y >= floor:
-            y = floor
+        target_y = self._fall_target - FEET_Y
+        if y >= target_y:
+            y = target_y
             if self._fall_vy > 420.0:
                 self._fall_vy = -self._fall_vy * 0.33
                 self.behavior.bounce(now)
@@ -497,7 +535,26 @@ class PetApp(QObject):
                 self._falling = False
                 self._fall_vy = 0.0
                 self.behavior.land(now)
+                self._support_check_at = now + 0.4
         self.window.move(self.window.x(), int(round(y)))
+
+    def _check_support(self, now: float, geometry) -> None:
+        if not self.window.isVisible() or self._falling or self.behavior.mode == "drag":
+            return
+        if now < self._support_check_at:
+            return
+        self._support_check_at = now + 0.5
+        feet = self.window.y() + FEET_Y
+        floor_feet = self._feet_floor(geometry)
+        if feet >= floor_feet - 2:
+            return
+        top = support.support_at(
+            self.window.x() + self.window.width() // 2,
+            feet,
+            self._exclude_hwnds(),
+        )
+        if top is None:
+            self._begin_fall(now, feet, floor_feet)
 
     def _bump_affection(self) -> None:
         if self.memory.total_interactions > 0 and self.memory.total_interactions % 15 == 0:
