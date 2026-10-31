@@ -28,6 +28,15 @@ ROOT = Path(__file__).resolve().parent.parent
 TRAY_ICON = ROOT / "assets" / "icons" / "tray.png"
 SINGLE_NAME = "ClaudePetInstance"
 
+PART_MOOD = {
+    "head": 3,
+    "face": 1,
+    "body": 2,
+    "hand": 2,
+    "skirt": -4,
+    "feet": 1,
+}
+
 MENU_STYLE = """
 QMenu {
     background: #F0EEE6;
@@ -89,6 +98,8 @@ class PetApp(QObject):
         self._first_greeted = False
         self._error_shown = False
         self._pstate = PerceptionState()
+        self._falling = False
+        self._fall_vy = 0.0
 
         self.sprites = SpriteLibrary()
         self.sprites.preload()
@@ -171,7 +182,7 @@ class PetApp(QObject):
         screen = None
         if self.config.x is not None and self.config.y is not None:
             screen = QGuiApplication.screenAt(
-                QPoint(self.config.x + self.window.width() // 2, self.config.y + 300)
+                QPoint(self.config.x + self.window.width() // 2, self.config.y + self.window.height() // 2)
             )
         if screen is None:
             screen = QGuiApplication.primaryScreen()
@@ -235,6 +246,8 @@ class PetApp(QObject):
                 x = self.window.x() + int(round(state.move_speed * dt))
                 x = max(geometry.left(), min(x, geometry.right() - self.window.width()))
                 self.window.move(x, self.window.y())
+            if self._falling and self.window.isVisible():
+                self._step_fall(geometry, dt, now)
             self.window.apply_state(state)
             if self.window.isVisible():
                 self.bubble.follow(self.window.frameGeometry(), geometry)
@@ -411,15 +424,15 @@ class PetApp(QObject):
         self.behavior.last_input = now
         self.behavior.next_wander = now + 30
 
-    def _on_clicked(self, head: bool) -> None:
+    def _on_clicked(self, part: str) -> None:
         now = time.time()
         if self.behavior.mode == "annoyed" and now < self.behavior.annoyed_until:
             return
         self._on_interacted()
-        self.behavior.on_click(now, head)
+        self.behavior.on_click(now, part)
         self.memory.add_interaction()
         self._bump_affection()
-        self.config.mood = change(self.config.mood, 2 if head else 3)
+        self.config.mood = change(self.config.mood, PART_MOOD.get(part, 2))
         self.config.mood_updated_at = now
         ctx = self._context(now)
         for action in self.behavior.drain():
@@ -459,11 +472,32 @@ class PetApp(QObject):
         if abs(speed) > 1500:
             self.config.mood = change(self.config.mood, -2)
             self.config.mood_updated_at = now
+        geometry = self._screen_geometry()
+        bottom = self.window.y() + self.window.height() - 1
+        if bottom < geometry.bottom() - 30 and abs(speed) < 2200:
+            self._falling = True
+            self._fall_vy = 0.0
+            self.behavior.start_fall(now)
         ctx = self._context(now)
         for action in self.behavior.drain():
             if action.kind == "speak":
                 self._speak(action.event, ctx)
         self._save_state()
+
+    def _step_fall(self, geometry, dt: float, now: float) -> None:
+        self._fall_vy = min(1500.0, self._fall_vy + 2200.0 * dt)
+        y = self.window.y() + self._fall_vy * dt
+        floor = geometry.bottom() - self.window.height() + 1
+        if y >= floor:
+            y = floor
+            if self._fall_vy > 420.0:
+                self._fall_vy = -self._fall_vy * 0.33
+                self.behavior.bounce(now)
+            else:
+                self._falling = False
+                self._fall_vy = 0.0
+                self.behavior.land(now)
+        self.window.move(self.window.x(), int(round(y)))
 
     def _bump_affection(self) -> None:
         if self.memory.total_interactions > 0 and self.memory.total_interactions % 15 == 0:
@@ -515,6 +549,8 @@ class PetApp(QObject):
 
     def _toggle_visibility(self) -> None:
         if self.window.isVisible():
+            self._falling = False
+            self._fall_vy = 0.0
             self.window.hide()
             self.bubble.hide()
         else:
@@ -547,9 +583,9 @@ class PetApp(QObject):
 
     def _populate_menu(self, menu: QMenu, full: bool) -> None:
         action = menu.addAction("摸摸头")
-        action.triggered.connect(lambda: self._on_clicked(True))
+        action.triggered.connect(lambda: self._on_clicked("head"))
         action = menu.addAction("说句话")
-        action.triggered.connect(lambda: self._on_clicked(False))
+        action.triggered.connect(lambda: self._on_clicked("body"))
 
         outfit_menu = menu.addMenu("换衣服")
         self._style_menu(outfit_menu)

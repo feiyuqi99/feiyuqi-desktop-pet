@@ -22,7 +22,7 @@ UNSOLICITED_EVENTS = {
     "anniversary_30",
     "anniversary_100",
 }
-SILENT_EVENTS = {"click", "pet", "double"}
+SILENT_EVENTS = {"click", "pet", "double", "face_poke", "high_five", "skirt", "feet", "land"}
 GLOBAL_GAP = 6.0
 
 

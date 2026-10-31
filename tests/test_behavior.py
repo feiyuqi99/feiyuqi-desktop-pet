@@ -30,24 +30,80 @@ def ctx(now: float, **kwargs) -> BehaviorContext:
 
 def test_head_click_pets():
     b = Behavior(random.Random(1))
-    b.on_click(DAY, head=True)
+    b.on_click(DAY, "head")
     assert b.mode == behavior.PET
     assert b.drain()[0].event == "pet"
     state = b.tick(ctx(DAY + 0.1))
     assert state.frame == "happy"
+    assert state.expression == "heart"
 
 
 def test_body_click_pokes():
     b = Behavior(random.Random(2))
-    b.on_click(DAY, head=False)
+    b.on_click(DAY, "body")
     assert b.mode == behavior.POKE
     assert b.drain()[0].event == "click"
+
+
+def test_face_click_blushes():
+    b = Behavior(random.Random(20))
+    b.on_click(DAY, "face")
+    assert b.drain()[0].event == "face_poke"
+    state = b.tick(ctx(DAY + 0.1))
+    assert state.expression == "blush"
+
+
+def test_hand_click_high_fives():
+    b = Behavior(random.Random(21))
+    b.on_click(DAY, "hand")
+    assert b.drain()[0].event == "high_five"
+    state = b.tick(ctx(DAY + 0.1))
+    assert state.expression == "sparkle"
+    assert state.hop < 0
+
+
+def test_skirt_click_annoys_immediately():
+    b = Behavior(random.Random(22))
+    b.on_click(DAY, "skirt")
+    assert b.mode == behavior.ANNOYED
+    assert b.drain()[0].event == "skirt"
+    state = b.tick(ctx(DAY + 0.2))
+    assert state.facing == -1
+    assert state.expression == "annoyed"
+
+
+def test_feet_click_hops():
+    b = Behavior(random.Random(23))
+    b.on_click(DAY, "feet")
+    assert b.drain()[0].event == "feet"
+    state = b.tick(ctx(DAY + 0.1))
+    assert state.hop < 0
+    assert state.expression == "surprised"
+
+
+def test_double_click_spins_and_hops():
+    b = Behavior(random.Random(24))
+    b.on_double_click(DAY)
+    state = b.tick(ctx(DAY + 0.1))
+    assert state.spin > 0
+    assert state.hop < 0
+
+
+def test_landing_squashes():
+    b = Behavior(random.Random(25))
+    b.start_fall(DAY)
+    assert b.mode == behavior.FALL
+    b.land(DAY + 1.0)
+    state = b.tick(ctx(DAY + 1.05))
+    assert state.mode == behavior.IDLE
+    assert state.squash_y < 1.0
+    assert state.squash_x > 1.0
 
 
 def test_three_rapid_clicks_annoy():
     b = Behavior(random.Random(3))
     for offset in (0.0, 1.0, 2.0):
-        b.on_click(DAY + offset, head=False)
+        b.on_click(DAY + offset, "body")
         b.drain()
     assert b.mode == behavior.ANNOYED
     state = b.tick(ctx(DAY + 3.0))
