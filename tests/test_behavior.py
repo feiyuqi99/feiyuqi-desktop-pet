@@ -287,3 +287,21 @@ def test_fast_release_wobble_is_gentle():
             worst = max(worst, abs(state.tilt - last_tilt))
         last_tilt = state.tilt
     assert worst < 1.0
+
+
+def test_state_exposes_music_phase_and_energy():
+    b = Behavior(random.Random(40))
+    b.tick(ctx(DAY, music_active=True, music_energy=0.5, music_tempo=120.0))
+    state = b.tick(
+        ctx(DAY + 0.1, music_active=True, music_energy=0.5, music_tempo=120.0)
+    )
+    assert state.music_energy == 0.5
+    assert state.music_phase > 0.0
+
+
+def test_music_motion_is_zero_when_inactive():
+    b = Behavior(random.Random(41))
+    b.tick(ctx(DAY, music_active=True, music_energy=0.5, music_tempo=120.0))
+    state = b.tick(ctx(DAY + 0.1))
+    assert state.music_phase == 0.0
+    assert state.music_energy == 0.0

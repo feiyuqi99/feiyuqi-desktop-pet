@@ -70,6 +70,8 @@ class PetState:
     squash_x: float = 1.0
     squash_y: float = 1.0
     note: bool = False
+    music_phase: float = 0.0
+    music_energy: float = 0.0
 
 
 @dataclass
@@ -534,4 +536,6 @@ class Behavior:
             squash_x=squash_x,
             squash_y=squash_y,
             note=music,
+            music_phase=self.music_phase if music else 0.0,
+            music_energy=ctx.music_energy if music else 0.0,
         )
