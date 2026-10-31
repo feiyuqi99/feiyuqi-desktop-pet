@@ -107,6 +107,8 @@ class Behavior:
         self.drag_started_at = 0.0
         self.drag_holder_notified = False
         self.music_hop_at = -100.0
+        self.music_phase = 0.0
+        self.music_tempo = 90.0
         self.last_activity = "other"
         self.pending: list[Action] = []
         self.expression = "neutral"
@@ -292,6 +294,7 @@ class Behavior:
 
     def tick(self, ctx: BehaviorContext) -> PetState:
         now = ctx.now
+        dt = 0.0 if self.last_tick <= 0 else max(0.0, min(0.1, now - self.last_tick))
         self._ensure_timers(now)
         self.last_tick = now
         dx = 0.0
@@ -402,8 +405,11 @@ class Behavior:
             and not ctx.quiet
             and self.mode in (IDLE, WANDER, PET, POKE)
         )
-        tempo = ctx.music_tempo if ctx.music_tempo > 0 else 90.0
-        music_phase = now * math.tau * tempo / 60.0
+        if ctx.music_active and not ctx.quiet:
+            tempo = ctx.music_tempo if ctx.music_tempo > 0 else 90.0
+            tempo = max(60.0, min(120.0, tempo))
+            self.music_tempo += (tempo - self.music_tempo) * min(1.0, dt * 2.0)
+            self.music_phase += dt * math.tau * self.music_tempo / 120.0
         if music and ctx.music_energy < 0.18 and self.mode in (IDLE, WANDER):
             frame = "blink"
 
@@ -420,7 +426,7 @@ class Behavior:
             bob = math.sin(now * math.tau / 3.6) * 2.5
 
         if music:
-            bob += math.sin(music_phase / 2.0) * (0.8 + 1.2 * ctx.music_energy)
+            bob += math.sin(self.music_phase) * (0.5 + 0.8 * ctx.music_energy)
 
         tilt = 0.0
         if self.mode == DRAG:
@@ -443,9 +449,10 @@ class Behavior:
         elif self.mode == WANDER:
             tilt = 1.5 * facing + math.sin(now * math.tau * 1.5) * 1.4
         if music:
-            tilt += math.sin(music_phase / 2.0) * (2.0 + 2.5 * ctx.music_energy)
+            tilt += math.sin(self.music_phase) * (1.2 + 1.4 * ctx.music_energy)
         if now < self.wobble_until:
-            tilt += math.sin(now * math.tau * 8.0) * 4.0
+            fade = min(1.0, (self.wobble_until - now) / 0.25)
+            tilt += math.sin(now * math.tau * 3.0) * 2.5 * fade
 
         scale = 1.03 if now < self.stretch_until else 1.0 + 0.004 * math.sin(now * math.tau / 3.6)
         if self.micro_kind == "yawn":

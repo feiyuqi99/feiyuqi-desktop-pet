@@ -184,6 +184,15 @@ def test_drag_hold_struggles():
 
 def test_music_makes_her_sway_with_note():
     b = Behavior(random.Random(11))
+    b.tick(
+        ctx(
+            100.0,
+            music_active=True,
+            music_energy=0.8,
+            music_pulse=1.0,
+            music_tempo=120.0,
+        )
+    )
     state = b.tick(
         ctx(
             100.1,
@@ -228,3 +237,53 @@ def test_say_something_always_queues_talk():
     assert [action.event for action in b.drain()] == ["talk"]
     state = b.tick(ctx(DAY + 0.1))
     assert state.expression == "happy"
+
+
+def test_music_sway_smooth_when_tempo_jitters():
+    b = Behavior(random.Random(30))
+    b.tick(ctx(DAY, music_active=True, music_energy=0.5, music_tempo=90.0))
+    last_tilt = b.tick(
+        ctx(DAY + 0.016, music_active=True, music_energy=0.5, music_tempo=90.0)
+    ).tilt
+    worst = 0.0
+    now = DAY + 0.016
+    for index in range(240):
+        now += 0.016
+        tempo = 200.0 if index % 2 else 80.0
+        state = b.tick(
+            ctx(now, music_active=True, music_energy=0.5, music_tempo=tempo)
+        )
+        worst = max(worst, abs(state.tilt - last_tilt))
+        last_tilt = state.tilt
+    assert worst < 0.5
+
+
+def test_music_sway_capped_at_one_hertz():
+    b = Behavior(random.Random(31))
+    now = DAY
+    previous = 0.0
+    crossings = 0
+    for _ in range(625):
+        now += 0.016
+        tilt = b.tick(
+            ctx(now, music_active=True, music_energy=0.8, music_tempo=200.0)
+        ).tilt
+        if previous and tilt * previous < 0:
+            crossings += 1
+        if tilt:
+            previous = tilt
+    assert crossings <= 21
+
+
+def test_fast_release_wobble_is_gentle():
+    b = Behavior(random.Random(32))
+    b.on_drag_end(DAY, 2000.0)
+    b.drain()
+    last_tilt = None
+    worst = 0.0
+    for index in range(50):
+        state = b.tick(ctx(DAY + index * 0.016))
+        if last_tilt is not None:
+            worst = max(worst, abs(state.tilt - last_tilt))
+        last_tilt = state.tilt
+    assert worst < 1.0
