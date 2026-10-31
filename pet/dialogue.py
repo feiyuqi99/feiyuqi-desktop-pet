@@ -10,7 +10,26 @@ from .memory import Memory
 from .mood import tier
 from .persona import followup_chance, postprocess, silence_chance, unsolicited_interval
 
-ALERT_EVENTS = {"hourly", "sit", "pomo_start", "pomo_break", "pomo_end", "pomo_break_end", "pomo_stop", "pomo_missed"}
+ALERT_EVENTS = {
+    "hourly",
+    "sit",
+    "pomo_start",
+    "pomo_break",
+    "pomo_end",
+    "pomo_break_end",
+    "pomo_stop",
+    "pomo_missed",
+    "care_morning",
+    "care_noon",
+    "care_afternoon",
+    "care_evening",
+    "care_breakfast",
+    "care_lunch",
+    "care_dinner",
+    "care_eyes",
+    "care_water",
+    "care_both",
+}
 UNSOLICITED_EVENTS = {
     "idle",
     "coding",

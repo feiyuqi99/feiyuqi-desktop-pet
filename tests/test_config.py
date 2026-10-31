@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pet.care import CareState
 from pet.config import Config, Pomodoro, Settings, load_config, save_config
 
 
@@ -8,6 +9,11 @@ def test_defaults_when_missing(tmp_path):
     assert config.outfit == "maid"
     assert config.mood == 70
     assert config.settings.chattiness == "normal"
+    assert config.settings.care_greet is True
+    assert config.settings.care_eyes is True
+    assert config.settings.care_water is True
+    assert config.settings.care_meal is True
+    assert config.care == CareState()
 
 
 def test_roundtrip(tmp_path):
@@ -19,8 +25,20 @@ def test_roundtrip(tmp_path):
         home_y=400,
         outfit="casual",
         mood=42,
-        settings=Settings(chattiness="chatty", perception=False, throwable=False, music=False),
+        settings=Settings(
+            chattiness="chatty",
+            perception=False,
+            throwable=False,
+            music=False,
+            care_greet=False,
+            care_eyes=False,
+        ),
         pomodoro=Pomodoro(phase="focus", ends_at=12345.0),
+        care=CareState(
+            day="2026-10-31",
+            greeted=["morning", "noon"],
+            meals=["breakfast"],
+        ),
     )
     save_config(config, path)
     loaded = load_config(path)
@@ -34,8 +52,33 @@ def test_roundtrip(tmp_path):
     assert loaded.settings.perception is False
     assert loaded.settings.throwable is False
     assert loaded.settings.music is False
+    assert loaded.settings.care_greet is False
+    assert loaded.settings.care_eyes is False
+    assert loaded.settings.care_water is True
+    assert loaded.settings.care_meal is True
     assert loaded.pomodoro.phase == "focus"
     assert loaded.pomodoro.ends_at == 12345.0
+    assert loaded.care == CareState(
+        day="2026-10-31",
+        greeted=["morning", "noon"],
+        meals=["breakfast"],
+    )
+
+
+def test_bad_care_state_falls_back(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(
+        '{"settings": {"care_greet": false, "care_water": true},'
+        ' "care": {"day": 5, "greeted": "morning", "meals": ["lunch", 3]}}',
+        encoding="utf-8",
+    )
+    config = load_config(path)
+    assert config.settings.care_greet is False
+    assert config.settings.care_eyes is True
+    assert config.settings.care_water is True
+    assert config.care.day == ""
+    assert config.care.greeted == []
+    assert config.care.meals == ["lunch"]
 
 
 def test_corrupt_config_falls_back(tmp_path):

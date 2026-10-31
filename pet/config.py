@@ -8,6 +8,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .care import CareState
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 CONFIG_PATH = DATA_DIR / "config.json"
@@ -27,6 +29,10 @@ class Settings:
     chattiness: str = "normal"
     throwable: bool = True
     music: bool = True
+    care_greet: bool = True
+    care_eyes: bool = True
+    care_water: bool = True
+    care_meal: bool = True
 
 
 @dataclass
@@ -48,6 +54,7 @@ class Config:
     quiet_until: float = 0.0
     settings: Settings = field(default_factory=Settings)
     pomodoro: Pomodoro = field(default_factory=Pomodoro)
+    care: CareState = field(default_factory=CareState)
 
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -101,9 +108,26 @@ def _load_settings(raw: Any) -> Settings:
         "perception",
         "throwable",
         "music",
+        "care_greet",
+        "care_eyes",
+        "care_water",
+        "care_meal",
     ):
         setattr(settings, key, bool(getattr(settings, key)))
     return settings
+
+
+def _load_care(raw: Any) -> CareState:
+    state = CareState()
+    if isinstance(raw, dict):
+        day = raw.get("day")
+        if isinstance(day, str):
+            state.day = day
+        for key in ("greeted", "meals"):
+            values = raw.get(key)
+            if isinstance(values, list):
+                setattr(state, key, [value for value in values if isinstance(value, str)])
+    return state
 
 
 def _load_pomodoro(raw: Any) -> Pomodoro:
@@ -150,6 +174,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         config.quiet_until = float(raw["quiet_until"])
     config.settings = _load_settings(raw.get("settings"))
     config.pomodoro = _load_pomodoro(raw.get("pomodoro"))
+    config.care = _load_care(raw.get("care"))
     return config
 
 

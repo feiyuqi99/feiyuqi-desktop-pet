@@ -18,6 +18,7 @@ from .animation import FEET_Y, SpriteLibrary
 from .audio import AudioMonitor, MusicState
 from .behavior import Behavior, BehaviorContext
 from .bubble import BubbleManager
+from .care import Care, CareAlert
 from .companion import Alert, Companion
 from .config import (
     CONFIG_PATH,
@@ -150,6 +151,14 @@ class PetApp(QObject):
         if self._restored_alert is not None:
             self.config.pomodoro.phase = self.companion.phase
             self.config.pomodoro.ends_at = self.companion.ends_at
+        self.care = Care(
+            now,
+            self.config.care,
+            greet=self.config.settings.care_greet,
+            eyes=self.config.settings.care_eyes,
+            water=self.config.settings.care_water,
+            meal=self.config.settings.care_meal,
+        )
 
         self._place_window()
         self.window.show_pet()
@@ -302,7 +311,25 @@ class PetApp(QObject):
                     held = action.event == "drag_hold" and not ctx.quiet
                     self._speak(action.event, ctx, force=held, priority=held)
 
-            for alert in self.companion.tick(now):
+            companion_alerts = self.companion.tick(now)
+            pomo_due = any(alert.kind.startswith("pomo") for alert in companion_alerts)
+            care_alert = None
+            if not pomo_due:
+                care_alert = self.care.tick(
+                    now,
+                    idle_seconds=self._pstate.idle_seconds,
+                    quiet=(
+                        now < self.config.quiet_until
+                        or self._pstate.activity == "meeting"
+                        or not self.window.isVisible()
+                    ),
+                )
+            if care_alert is not None:
+                self._alert_speak(care_alert, ctx)
+                self._save_state()
+            for alert in companion_alerts:
+                if care_alert is not None and not alert.kind.startswith("pomo"):
+                    continue
                 self._alert_speak(alert, ctx)
 
             if music.active and not self._music_was_active:
@@ -463,7 +490,7 @@ class PetApp(QObject):
             return
         self.bubble.enqueue(text, 3200)
 
-    def _alert_speak(self, alert: Alert, ctx: DialogueContext) -> None:
+    def _alert_speak(self, alert: Alert | CareAlert, ctx: DialogueContext) -> None:
         speech = self.dialogue.alert(alert.event, ctx)
         if speech is not None:
             self._handle_speech(speech, 6200, priority=True)
@@ -912,6 +939,20 @@ class PetApp(QObject):
         action.setData("music")
         action.triggered.connect(lambda checked=False: self._set_music(checked))
 
+        care_menu = menu.addMenu("关怀提醒")
+        self._style_menu(care_menu)
+        for label, key in (
+            ("定时问候", "greet"),
+            ("闭眼休息", "eyes"),
+            ("喝水", "water"),
+            ("吃饭", "meal"),
+        ):
+            item = care_menu.addAction(label)
+            item.setCheckable(True)
+            item.setChecked(getattr(self.config.settings, f"care_{key}"))
+            item.setData(f"care_{key}")
+            item.triggered.connect(lambda checked=False, key=key: self._set_care(key, checked))
+
         menu.addSeparator()
 
         action = menu.addAction("久坐提醒")
@@ -965,6 +1006,8 @@ class PetApp(QObject):
                 action.setChecked(self.config.settings.throwable)
             elif data == "music":
                 action.setChecked(self.config.settings.music)
+            elif data in ("care_greet", "care_eyes", "care_water", "care_meal"):
+                action.setChecked(getattr(self.config.settings, data))
             elif data == "toggle":
                 action.setText("隐藏" if self.window.isVisible() else "显示")
             elif isinstance(data, str) and data.startswith("outfit:"):
@@ -1050,6 +1093,30 @@ class PetApp(QObject):
             self._music_was_active = False
         self._save_state()
         self._direct_bubble("好，放歌吧。" if checked else "那我不晃了。")
+
+    def _set_care(self, key: str, checked: bool) -> None:
+        flag = f"care_{key}"
+        if not hasattr(self.config.settings, flag):
+            return
+        setattr(self.config.settings, flag, checked)
+        now = time.time()
+        if key == "greet":
+            self.care.set_greet(checked, now)
+        elif key == "eyes":
+            self.care.set_eyes(checked, now)
+        elif key == "water":
+            self.care.set_water(checked, now)
+        else:
+            self.care.set_meal(checked)
+        self._save_state()
+        messages = {
+            "greet": ("好，到点我会打招呼。", "好，那我不打招呼了。"),
+            "eyes": ("每半小时提醒你闭眼。", "好，眼睛你自己看着办。"),
+            "water": ("每小时提醒你喝水。", "好，那我不催了。"),
+            "meal": ("到饭点我会喊你。", "好，那你自己记得吃。"),
+        }
+        on, off = messages[key]
+        self._direct_bubble(on if checked else off)
 
     def _set_chattiness(self, value: str) -> None:
         if value not in ("quiet", "normal", "chatty"):
