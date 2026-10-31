@@ -544,6 +544,19 @@ class PetApp(QObject):
                 self._speak(action.event, ctx)
         self._maybe_name_ask(ctx)
 
+    def _say_something(self) -> None:
+        now = time.time()
+        self._on_interacted()
+        self.behavior.say(now)
+        self.memory.add_interaction()
+        self._bump_affection()
+        self.config.mood = change(self.config.mood, 1)
+        self.config.mood_updated_at = now
+        ctx = self._context(now)
+        for action in self.behavior.drain():
+            if action.kind == "speak":
+                self._speak(action.event, ctx, force=True, priority=True)
+
     def _on_double_clicked(self) -> None:
         now = time.time()
         if self.behavior.mode == "annoyed" and now < self.behavior.annoyed_until:
@@ -874,7 +887,7 @@ class PetApp(QObject):
         action = menu.addAction("摸摸头")
         action.triggered.connect(lambda: self._on_clicked("head"))
         action = menu.addAction("说句话")
-        action.triggered.connect(lambda: self._on_clicked("body"))
+        action.triggered.connect(self._say_something)
 
         outfit_menu = menu.addMenu("换衣服")
         self._style_menu(outfit_menu)

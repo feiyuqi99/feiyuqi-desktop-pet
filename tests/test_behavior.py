@@ -218,3 +218,13 @@ def test_no_music_no_note():
     state = b.tick(ctx(DAY + 0.1))
     assert not state.note
     assert state.expression == "neutral"
+
+
+def test_say_something_always_queues_talk():
+    b = Behavior(random.Random(21))
+    b.mode = behavior.ANNOYED
+    b.annoyed_until = DAY + 10
+    b.say(DAY)
+    assert [action.event for action in b.drain()] == ["talk"]
+    state = b.tick(ctx(DAY + 0.1))
+    assert state.expression == "happy"

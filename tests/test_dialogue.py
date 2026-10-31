@@ -89,3 +89,19 @@ def test_alert_bypasses_quiet_and_has_no_followup():
     assert speech is not None
     assert speech.followup is None
     assert speech.delay_ms == 0
+
+
+def test_talk_has_lines():
+    assert sum(1 for line in LINES if line.event == "talk") >= 3
+
+
+def test_forced_talk_ignores_gap_and_quiet():
+    now = datetime(2026, 1, 5, 10, 0).timestamp()
+    memory = Memory()
+    engine = DialogueEngine(LINES, memory, random.Random(7))
+    assert engine.maybe_speak("click", context(now), allow_silence=False) is not None
+    forced = engine.maybe_speak(
+        "talk", context(now + 1, quiet=True), force=True, allow_silence=False
+    )
+    assert forced is not None
+    assert forced.text

@@ -399,6 +399,17 @@ LINES: list[Line] = [
     L("这种话我只说一次。……好吧，可能不止一次。", "affection", "familiar"),
     L("我等你回来，等得有点久。", "affection", "close"),
     L("我不知道这算什么。反正你在的时候，我心情很好。", "affection", "close"),
+    # 说句话
+    L("我在。", "talk"),
+    L("嗯，我在听。", "talk"),
+    L("想听什么？", "talk"),
+    L("……说什么好呢。", "talk"),
+    L("今天也还好，没什么大事。", "talk"),
+    L("突然想听我说话？", "talk", "familiar"),
+    L("你忙你的，我在这儿。", "talk"),
+    L("那就说一句：别太累。", "talk"),
+    L("我在看你。……不是，我随便看看。", "talk", "close"),
+    L("有你在，我就不算自言自语。", "talk", "close"),
     # 关怀
     L("早上好。今天也慢慢来。", "care_morning"),
     L("早。先喝口热水。", "care_morning"),

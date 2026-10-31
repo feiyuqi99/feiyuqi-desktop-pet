@@ -19,6 +19,7 @@ ALERT_EVENTS = {
     "pomo_break_end",
     "pomo_stop",
     "pomo_missed",
+    "talk",
     "care_morning",
     "care_noon",
     "care_afternoon",

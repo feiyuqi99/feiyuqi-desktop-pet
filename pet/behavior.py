@@ -209,6 +209,19 @@ class Behavior:
             self._hop(now, 6.0)
         self._queue(PART_EVENTS.get(part, "click"))
 
+    def say(self, now: float) -> None:
+        self.last_input = now
+        if self.mode in (DRAG, FALL):
+            return
+        if self.mode in (NAP, SLEEP):
+            self.mode = IDLE
+            self.stretch_until = now + 0.35
+        self.mode = POKE
+        self.mode_until = now + 1.2
+        self.next_wander = now + self.rng.uniform(30, 90)
+        self._set_expression("happy", now + 1.2)
+        self._queue("talk")
+
     def on_double_click(self, now: float) -> None:
         if self.mode in (DRAG, FALL):
             return
