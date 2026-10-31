@@ -32,6 +32,7 @@ from .mood import change, decay, label as mood_label
 from .perception import Perception, PerceptionState, time_band
 from .persona import pet_name
 from .window import PetWindow
+from .uia import InputScanner
 from . import support
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -114,6 +115,9 @@ class PetApp(QObject):
         self._grounded = False
         self._fall_target = 0.0
         self._support_check_at = 0.0
+        self._scanner = InputScanner()
+        self._scan_at = 0.0
+        self._input_host = 0
         self._save_lock = threading.Lock()
 
         self.sprites = SpriteLibrary()
@@ -144,6 +148,7 @@ class PetApp(QObject):
 
         self._place_window()
         self.window.show_pet()
+        self._request_scan(time.time())
 
         self.tray = QSystemTrayIcon(QIcon(str(TRAY_ICON)), self.qt_app)
         self._tray_menu = self._build_tray_menu()
@@ -246,6 +251,10 @@ class PetApp(QObject):
             )
             ctx = self._context(now)
             geometry = self._screen_geometry()
+            if self.behavior.mode == "drag" or self._flying:
+                self._request_scan(now, 0.8)
+            elif self._input_host:
+                self._request_scan(now, 1.5, self._input_host)
             if self.behavior.mode == "drag":
                 vx, vy = self.window.drag_velocity()
                 self.behavior.set_drag_motion(vx, vy)
@@ -503,10 +512,12 @@ class PetApp(QObject):
         now = time.time()
         self._flying = False
         self._grounded = False
+        self._input_host = 0
         self._vx = 0.0
         self._vy = 0.0
         self._on_interacted()
         self.behavior.on_drag_start(now)
+        self._request_scan(now)
         ctx = self._context(now)
         for action in self.behavior.drain():
             if action.kind == "speak":
@@ -524,28 +535,32 @@ class PetApp(QObject):
         feet = self.window.y() + FEET_Y
         floor_feet = self._feet_floor(geometry)
         center = self.window.x() + self.window.width() // 2
-        top = support.support_at(center, feet, self._exclude_hwnds())
+        inputs = self._inputs()
+        top = support.support_at(center, feet, self._exclude_hwnds(), inputs=inputs)
         if top is not None:
             target = float(top)
         else:
-            surface = self._surface_below(feet, floor_feet)
+            surface = self._surface_below(feet, floor_feet, inputs)
             target = floor_feet if surface is None else float(surface)
         calm = abs(vx) < 80 and abs(vy) < 80
         if calm and top is not None:
             self.window.move(self.window.x(), int(round(target - FEET_Y)))
             self._flying = False
             self._grounded = False
+            self._input_host = support.input_host_at(center, top, inputs) or 0
             self._vx = 0.0
             self._vy = 0.0
             self.behavior.land(now)
         else:
             self._flying = True
             self._grounded = False
+            self._input_host = 0
             self._vx = max(-1800.0, min(1800.0, vx))
             self._vy = max(-1600.0, min(1600.0, vy))
             self._fall_target = target
             self.behavior.start_fall(now)
         self._support_check_at = now + 0.4
+        self._request_scan(now)
         ctx = self._context(now)
         for action in self.behavior.drain():
             if action.kind == "speak":
@@ -561,9 +576,27 @@ class PetApp(QObject):
             handles.add(int(self.bubble.bubble.winId()))
         return frozenset(handles)
 
-    def _surface_below(self, feet: float, floor_feet: float) -> int | None:
+    def _request_scan(self, now: float, interval: float = 0.0, host: int | None = None) -> None:
+        if now - self._scan_at < interval:
+            return
+        self._scan_at = now
+        self._scanner.request(self._exclude_hwnds(), host)
+
+    def _inputs(self) -> list[tuple[int, int, int, int, int]]:
+        return self._scanner.snapshot()
+
+    def _surface_below(
+        self,
+        feet: float,
+        floor_feet: float,
+        inputs: list[tuple[int, int, int, int, int]] | None = None,
+    ) -> int | None:
         center = self.window.x() + self.window.width() // 2
-        return support.surface_below(center, feet + 1, floor_feet, self._exclude_hwnds())
+        if inputs is None:
+            inputs = self._inputs()
+        return support.surface_below(
+            center, feet + 1, floor_feet, self._exclude_hwnds(), inputs
+        )
 
     def _begin_fall(self, now: float, feet: float, floor_feet: float) -> None:
         surface = self._surface_below(feet, floor_feet)
@@ -599,13 +632,17 @@ class PetApp(QObject):
                 self._support_check_at = now + 0.12
                 feet = y + FEET_Y
                 center = int(round(x)) + self.window.width() // 2
-                if support.support_at(center, feet, self._exclude_hwnds()) is None:
+                inputs = self._inputs()
+                top = support.support_at(
+                    center, feet, self._exclude_hwnds(), inputs=inputs
+                )
+                host = support.input_host_at(center, top, inputs) if top is not None else None
+                self._input_host = host or 0
+                if top is None:
                     lost = True
                     self._grounded = False
                     floor_feet = self._feet_floor(geometry)
-                    surface = support.surface_below(
-                        center, feet + 1, floor_feet, self._exclude_hwnds()
-                    )
+                    surface = self._surface_below(feet, floor_feet, inputs)
                     self._fall_target = floor_feet if surface is None else float(surface)
                     self.behavior.start_fall(now)
             if not lost and not self._vx:
@@ -617,13 +654,7 @@ class PetApp(QObject):
         previous = self._vy
         self._vy = min(1800.0, self._vy + 2400.0 * dt)
         if previous < 0.0 <= self._vy:
-            center = int(round(x)) + self.window.width() // 2
-            surface = support.surface_below(
-                center,
-                y + FEET_Y + 1,
-                self._feet_floor(geometry),
-                self._exclude_hwnds(),
-            )
+            surface = self._surface_below(y + FEET_Y, self._feet_floor(geometry))
             if surface is not None:
                 self._fall_target = float(surface)
         y += self._vy * dt
@@ -654,14 +685,21 @@ class PetApp(QObject):
         feet = self.window.y() + FEET_Y
         floor_feet = self._feet_floor(geometry)
         if feet >= floor_feet - 2:
+            self._input_host = 0
             return
+        center = self.window.x() + self.window.width() // 2
+        inputs = self._inputs()
         top = support.support_at(
-            self.window.x() + self.window.width() // 2,
+            center,
             feet,
             self._exclude_hwnds(),
+            inputs=inputs,
         )
         if top is None:
+            self._input_host = 0
             self._begin_fall(now, feet, floor_feet)
+        else:
+            self._input_host = support.input_host_at(center, top, inputs) or 0
 
     def _bump_affection(self) -> None:
         if self.memory.total_interactions > 0 and self.memory.total_interactions % 15 == 0:
@@ -728,6 +766,10 @@ class PetApp(QObject):
             self._save_state_sync()
         except Exception:
             logging.exception("save failed on quit")
+        try:
+            self._scanner.close()
+        except Exception:
+            logging.exception("scanner close failed")
         logging.info("pet quit")
 
     def _on_tray_activated(self, reason) -> None:
@@ -968,6 +1010,7 @@ class PetApp(QObject):
         y = max(geometry.top(), min(home_y, geometry.bottom() - self.window.height()))
         self._flying = False
         self._grounded = False
+        self._input_host = 0
         self._vx = 0.0
         self._vy = 0.0
         self.window.move(x, y)

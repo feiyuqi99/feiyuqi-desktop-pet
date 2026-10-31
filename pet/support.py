@@ -114,31 +114,102 @@ def pick_surface(
     return best
 
 
-def surface_below(
-    x: int, feet_y: float, floor: float, exclude: frozenset[int] = frozenset()
-) -> int | None:
-    windows: list[tuple[int, int, int, int]] = []
+def _window_stack(exclude: frozenset[int]) -> list[tuple[int, tuple[int, int, int, int]]]:
+    stack: list[tuple[int, tuple[int, int, int, int]]] = []
     for hwnd, raw in _windows(exclude):
-        if not (raw[0] <= x < raw[2]):
-            continue
         if _cloaked(hwnd):
             continue
         visual = _visual_rect(hwnd)
-        windows.append(visual if visual is not None else raw)
-    surfaces: list[tuple[int, int, int, int]] = []
-    for index, rect in enumerate(windows):
+        stack.append((hwnd, visual if visual is not None else raw))
+    return stack
+
+
+def _blocked(
+    windows: list[tuple[int, tuple[int, int, int, int]]],
+    index: int,
+    x: int,
+    probe: int,
+) -> bool:
+    for _hwnd, (left, top, right, bottom) in windows[:index]:
+        if left <= x < right and top <= probe < bottom:
+            return True
+    return False
+
+
+def pick_surface_below(
+    windows: list[tuple[int, tuple[int, int, int, int]]],
+    inputs: list[tuple[int, int, int, int, int]],
+    x: int,
+    feet_y: float,
+    floor: float,
+) -> int | None:
+    best: int | None = None
+    for index, (_hwnd, rect) in enumerate(windows):
         left, top, right, _bottom = rect
         if not (left <= x < right and feet_y < top <= floor):
             continue
-        probe = top + 2
-        covered = False
-        for above_left, above_top, above_right, above_bottom in windows[:index]:
-            if above_left <= x < above_right and above_top <= probe < above_bottom:
-                covered = True
-                break
-        if not covered:
-            surfaces.append(rect)
-    return pick_surface(surfaces, x, feet_y, floor)
+        if _blocked(windows, index, x, top + 2):
+            continue
+        if best is None or top < best:
+            best = top
+
+    hosts = {hwnd: index for index, (hwnd, _rect) in enumerate(windows)}
+    for left, top, right, _bottom, host in inputs:
+        index = hosts.get(host)
+        if index is None or not (left <= x < right and feet_y < top <= floor):
+            continue
+        if _blocked(windows, index, x, top + 2):
+            continue
+        if best is None or top < best:
+            best = top
+    return best
+
+
+def pick_standing_surface(
+    windows: list[tuple[int, tuple[int, int, int, int]]],
+    inputs: list[tuple[int, int, int, int, int]],
+    x: int,
+    feet_y: float,
+    tolerance: int = 4,
+) -> int | None:
+    owner = None
+    for index, (_hwnd, rect) in enumerate(windows):
+        left, top, right, bottom = rect
+        if left <= x < right and top <= feet_y + 6 < bottom:
+            owner = index
+            break
+    if owner is None:
+        return None
+
+    host, rect = windows[owner]
+    best: int | None = rect[1] if abs(rect[1] - feet_y) <= tolerance else None
+    for left, top, right, _bottom, input_host in inputs:
+        if input_host != host or not (left <= x < right):
+            continue
+        if abs(top - feet_y) > tolerance:
+            continue
+        if best is None or abs(top - feet_y) < abs(best - feet_y):
+            best = top
+    return best
+
+
+def input_host_at(
+    x: int, top: int, inputs: list[tuple[int, int, int, int, int]]
+) -> int | None:
+    for left, input_top, right, _bottom, host in inputs:
+        if input_top == top and left <= x < right:
+            return host
+    return None
+
+
+def surface_below(
+    x: int,
+    feet_y: float,
+    floor: float,
+    exclude: frozenset[int] = frozenset(),
+    inputs: list[tuple[int, int, int, int, int]] = (),
+) -> int | None:
+    return pick_surface_below(_window_stack(exclude), list(inputs), x, feet_y, floor)
 
 
 def support_at(
@@ -146,16 +217,6 @@ def support_at(
     feet_y: float,
     exclude: frozenset[int] = frozenset(),
     tolerance: int = 4,
+    inputs: list[tuple[int, int, int, int, int]] = (),
 ) -> int | None:
-    for hwnd, raw in _windows(exclude):
-        left, top, right, bottom = raw
-        if left <= x < right and top <= feet_y + 6 < bottom:
-            if _cloaked(hwnd):
-                continue
-            visual = _visual_rect(hwnd)
-            if visual is not None:
-                left, top, right, bottom = visual
-            if abs(top - feet_y) <= tolerance:
-                return top
-            return None
-    return None
+    return pick_standing_surface(_window_stack(exclude), list(inputs), x, feet_y, tolerance)
