@@ -180,3 +180,41 @@ def test_drag_hold_struggles():
     assert [action.event for action in b.drain()] == ["drag_hold"]
     b.tick(ctx(DAY + 2.6))
     assert b.drain() == []
+
+
+def test_music_makes_her_sway_with_note():
+    b = Behavior(random.Random(11))
+    state = b.tick(
+        ctx(
+            100.1,
+            music_active=True,
+            music_energy=0.8,
+            music_pulse=1.0,
+            music_tempo=120.0,
+        )
+    )
+    assert state.note
+    assert state.expression == "sparkle"
+    assert abs(state.tilt) > 0.5
+
+
+def test_soft_music_blinks_and_blushes():
+    b = Behavior(random.Random(12))
+    state = b.tick(
+        ctx(
+            DAY + 0.1,
+            music_active=True,
+            music_energy=0.05,
+            music_tempo=70.0,
+        )
+    )
+    assert state.note
+    assert state.frame == "blink"
+    assert state.expression == "blush"
+
+
+def test_no_music_no_note():
+    b = Behavior(random.Random(13))
+    state = b.tick(ctx(DAY + 0.1))
+    assert not state.note
+    assert state.expression == "neutral"

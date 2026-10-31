@@ -49,6 +49,10 @@ class BehaviorContext:
     pet_x: float = 0.0
     screen_left: float = 0.0
     screen_right: float = 1920.0
+    music_active: bool = False
+    music_energy: float = 0.0
+    music_pulse: float = 0.0
+    music_tempo: float = 0.0
 
 
 @dataclass
@@ -65,6 +69,7 @@ class PetState:
     hop: float = 0.0
     squash_x: float = 1.0
     squash_y: float = 1.0
+    note: bool = False
 
 
 @dataclass
@@ -101,6 +106,7 @@ class Behavior:
         self.drag_vy = 0.0
         self.drag_started_at = 0.0
         self.drag_holder_notified = False
+        self.music_hop_at = -100.0
         self.last_activity = "other"
         self.pending: list[Action] = []
         self.expression = "neutral"
@@ -378,6 +384,16 @@ class Behavior:
         else:
             frame = "idle"
 
+        music = (
+            ctx.music_active
+            and not ctx.quiet
+            and self.mode in (IDLE, WANDER, PET, POKE)
+        )
+        tempo = ctx.music_tempo if ctx.music_tempo > 0 else 90.0
+        music_phase = now * math.tau * tempo / 60.0
+        if music and ctx.music_energy < 0.18 and self.mode in (IDLE, WANDER):
+            frame = "blink"
+
         drag_held = now - self.drag_started_at if self.mode == DRAG else 0.0
         if self.mode == DRAG:
             bob = math.sin(now * math.tau * 2.2) * 1.8 if drag_held > 1.6 else 0.0
@@ -389,6 +405,9 @@ class Behavior:
             bob = math.sin(now * math.tau * 3.0) * 2.0
         else:
             bob = math.sin(now * math.tau / 3.6) * 2.5
+
+        if music:
+            bob += math.sin(music_phase / 2.0) * (0.8 + 1.2 * ctx.music_energy)
 
         tilt = 0.0
         if self.mode == DRAG:
@@ -410,6 +429,8 @@ class Behavior:
             tilt = -0.8
         elif self.mode == WANDER:
             tilt = 1.5 * facing + math.sin(now * math.tau * 1.5) * 1.4
+        if music:
+            tilt += math.sin(music_phase / 2.0) * (2.0 + 2.5 * ctx.music_energy)
         if now < self.wobble_until:
             tilt += math.sin(now * math.tau * 8.0) * 4.0
 
@@ -429,6 +450,22 @@ class Behavior:
             expression = "annoyed"
         elif self.mode == DRAG:
             expression = "annoyed" if drag_held > 1.8 else "surprised"
+        elif music and self.mode in (IDLE, WANDER) and now >= self.expression_until:
+            if ctx.music_energy >= 0.6:
+                expression = "sparkle"
+            elif ctx.music_energy >= 0.22:
+                expression = "happy"
+            else:
+                expression = "blush"
+
+        if (
+            music
+            and ctx.music_pulse > 0.7
+            and ctx.music_energy > 0.45
+            and now - self.music_hop_at > 3.0
+        ):
+            self.music_hop_at = now
+            self._hop(now, 4.0)
 
         hop = 0.0
         if self.hop_started < self.hop_until and now < self.hop_until:
@@ -476,4 +513,5 @@ class Behavior:
             hop=hop,
             squash_x=squash_x,
             squash_y=squash_y,
+            note=music,
         )

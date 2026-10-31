@@ -15,6 +15,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox, QSystemTrayIcon
 
 from .animation import FEET_Y, SpriteLibrary
+from .audio import AudioMonitor, MusicState
 from .behavior import Behavior, BehaviorContext
 from .bubble import BubbleManager
 from .companion import Alert, Companion
@@ -118,6 +119,10 @@ class PetApp(QObject):
         self._scanner = InputScanner()
         self._scan_at = 0.0
         self._input_host = 0
+        self.audio = AudioMonitor()
+        self._music = MusicState()
+        self._music_was_active = False
+        self._music_started_at = 0.0
         self._save_lock = threading.Lock()
 
         self.sprites = SpriteLibrary()
@@ -149,6 +154,8 @@ class PetApp(QObject):
         self._place_window()
         self.window.show_pet()
         self._request_scan(time.time())
+        if self.config.settings.music:
+            self.audio.start()
 
         self.tray = QSystemTrayIcon(QIcon(str(TRAY_ICON)), self.qt_app)
         self._tray_menu = self._build_tray_menu()
@@ -251,6 +258,8 @@ class PetApp(QObject):
             )
             ctx = self._context(now)
             geometry = self._screen_geometry()
+            music = self.audio.snapshot()
+            self._music = music
             if self.behavior.mode == "drag" or self._flying:
                 self._request_scan(now, 0.8)
             elif self._input_host:
@@ -269,6 +278,10 @@ class PetApp(QObject):
                 pet_x=self.window.x(),
                 screen_left=geometry.left(),
                 screen_right=geometry.right() - self.window.width(),
+                music_active=music.active,
+                music_energy=music.energy,
+                music_pulse=music.pulse,
+                music_tempo=music.tempo,
             )
             state = self.behavior.tick(behavior_ctx)
             if state.move_speed and self.window.isVisible():
@@ -291,6 +304,15 @@ class PetApp(QObject):
 
             for alert in self.companion.tick(now):
                 self._alert_speak(alert, ctx)
+
+            if music.active and not self._music_was_active:
+                self._music_was_active = True
+                self._music_started_at = now
+                self._speak("music_start", ctx)
+            elif not music.active and self._music_was_active:
+                self._music_was_active = False
+                if now - self._music_started_at >= 12:
+                    self._speak("music_end", ctx)
 
             if not self._first_greeted and not ctx.quiet and now - self._last_greet_try > 5:
                 self._last_greet_try = now
@@ -388,6 +410,8 @@ class PetApp(QObject):
             and random.random() < 0.15
         ):
             event = "affection"
+        elif self._music.active and random.random() < 0.2:
+            event = "music"
         elif ctx.activity == "coding":
             event = "coding"
         self._speak(event, ctx)
@@ -525,6 +549,9 @@ class PetApp(QObject):
 
     def _on_drag_finished(self, vx: float, vy: float) -> None:
         now = time.time()
+        if not self.config.settings.throwable:
+            vx = 0.0
+            vy = 0.0
         self.behavior.on_drag_end(now, vx)
         self.memory.add_interaction()
         self._bump_affection()
@@ -770,6 +797,10 @@ class PetApp(QObject):
             self._scanner.close()
         except Exception:
             logging.exception("scanner close failed")
+        try:
+            self.audio.stop()
+        except Exception:
+            logging.exception("audio stop failed")
         logging.info("pet quit")
 
     def _on_tray_activated(self, reason) -> None:
@@ -852,44 +883,12 @@ class PetApp(QObject):
         action = menu.addAction("回到原位")
         action.triggered.connect(self._go_home)
 
+        settings_menu = menu.addMenu("设置")
+        self._style_menu(settings_menu)
+        self._add_settings_menu(settings_menu)
+
         if full:
             menu.addSeparator()
-            action = menu.addAction("久坐提醒")
-            action.setCheckable(True)
-            action.setChecked(self.config.settings.sit_reminder)
-            action.setData("sit")
-            action.triggered.connect(lambda checked=False: self._set_sit(checked))
-
-            action = menu.addAction("整点报时")
-            action.setCheckable(True)
-            action.setChecked(self.config.settings.hourly_chime)
-            action.setData("hourly")
-            action.triggered.connect(lambda checked=False: self._set_hourly(checked))
-
-            action = menu.addAction("环境感知")
-            action.setCheckable(True)
-            action.setChecked(self.config.settings.perception)
-            action.setData("perception")
-            action.triggered.connect(lambda checked=False: self._set_perception(checked))
-
-            action = menu.addAction("始终置顶")
-            action.setCheckable(True)
-            action.setChecked(self.config.settings.always_on_top)
-            action.setData("always_top")
-            action.triggered.connect(lambda checked=False: self._set_always_top(checked))
-
-            chat_menu = menu.addMenu("话多程度")
-            self._style_menu(chat_menu)
-            chat_group = QActionGroup(chat_menu)
-            chat_group.setExclusive(True)
-            for label, value in (("安静", "quiet"), ("正常", "normal"), ("话痨", "chatty")):
-                item = chat_menu.addAction(label)
-                item.setCheckable(True)
-                item.setChecked(self.config.settings.chattiness == value)
-                item.setData(f"chattiness:{value}")
-                chat_group.addAction(item)
-                item.triggered.connect(lambda checked=False, value=value: self._set_chattiness(value))
-
             action = menu.addAction("清空记忆")
             action.triggered.connect(self._clear_memory)
 
@@ -899,6 +898,57 @@ class PetApp(QObject):
         action.triggered.connect(self._toggle_visibility)
         action = menu.addAction("先去睡了")
         action.triggered.connect(self._exit)
+
+    def _add_settings_menu(self, menu: QMenu) -> None:
+        action = menu.addAction("允许甩抛")
+        action.setCheckable(True)
+        action.setChecked(self.config.settings.throwable)
+        action.setData("throwable")
+        action.triggered.connect(lambda checked=False: self._set_throwable(checked))
+
+        action = menu.addAction("随音乐反应")
+        action.setCheckable(True)
+        action.setChecked(self.config.settings.music)
+        action.setData("music")
+        action.triggered.connect(lambda checked=False: self._set_music(checked))
+
+        menu.addSeparator()
+
+        action = menu.addAction("久坐提醒")
+        action.setCheckable(True)
+        action.setChecked(self.config.settings.sit_reminder)
+        action.setData("sit")
+        action.triggered.connect(lambda checked=False: self._set_sit(checked))
+
+        action = menu.addAction("整点报时")
+        action.setCheckable(True)
+        action.setChecked(self.config.settings.hourly_chime)
+        action.setData("hourly")
+        action.triggered.connect(lambda checked=False: self._set_hourly(checked))
+
+        action = menu.addAction("环境感知")
+        action.setCheckable(True)
+        action.setChecked(self.config.settings.perception)
+        action.setData("perception")
+        action.triggered.connect(lambda checked=False: self._set_perception(checked))
+
+        action = menu.addAction("始终置顶")
+        action.setCheckable(True)
+        action.setChecked(self.config.settings.always_on_top)
+        action.setData("always_top")
+        action.triggered.connect(lambda checked=False: self._set_always_top(checked))
+
+        chat_menu = menu.addMenu("话多程度")
+        self._style_menu(chat_menu)
+        chat_group = QActionGroup(chat_menu)
+        chat_group.setExclusive(True)
+        for label, value in (("安静", "quiet"), ("正常", "normal"), ("话痨", "chatty")):
+            item = chat_menu.addAction(label)
+            item.setCheckable(True)
+            item.setChecked(self.config.settings.chattiness == value)
+            item.setData(f"chattiness:{value}")
+            chat_group.addAction(item)
+            item.triggered.connect(lambda checked=False, value=value: self._set_chattiness(value))
 
     def _sync_menu(self) -> None:
         for action in self._all_actions(self._tray_menu):
@@ -911,6 +961,10 @@ class PetApp(QObject):
                 action.setChecked(self.config.settings.perception)
             elif data == "always_top":
                 action.setChecked(self.config.settings.always_on_top)
+            elif data == "throwable":
+                action.setChecked(self.config.settings.throwable)
+            elif data == "music":
+                action.setChecked(self.config.settings.music)
             elif data == "toggle":
                 action.setText("隐藏" if self.window.isVisible() else "显示")
             elif isinstance(data, str) and data.startswith("outfit:"):
@@ -980,6 +1034,22 @@ class PetApp(QObject):
         self.config.settings.always_on_top = checked
         self.window.set_always_on_top(checked)
         self._save_state()
+
+    def _set_throwable(self, checked: bool) -> None:
+        self.config.settings.throwable = checked
+        self._save_state()
+        self._direct_bubble("可以甩了。" if checked else "好，那我不飞了。")
+
+    def _set_music(self, checked: bool) -> None:
+        self.config.settings.music = checked
+        if checked:
+            self.audio.start()
+        else:
+            self.audio.stop()
+            self._music = MusicState()
+            self._music_was_active = False
+        self._save_state()
+        self._direct_bubble("好，放歌吧。" if checked else "那我不晃了。")
 
     def _set_chattiness(self, value: str) -> None:
         if value not in ("quiet", "normal", "chatty"):

@@ -269,6 +269,17 @@ class PetWindow(QWidget):
                 y = 58 - phase * 30 - index * 5
                 painter.drawText(QPointF(x, y), "z")
 
+        if state.note:
+            now = time.monotonic()
+            painter.setFont(QFont("Microsoft YaHei UI", 13, QFont.Bold))
+            for index in range(2):
+                phase = (now * 0.35 + index * 0.5) % 1.0
+                alpha = int(205 * (1.0 - phase * 0.7))
+                painter.setPen(QColor(217, 119, 87, alpha))
+                x = 194 + index * 18 + math.sin(now * 1.6 + index * 1.7) * 4
+                y = 62 - phase * 34 - index * 3
+                painter.drawText(QPointF(x, y), "♪")
+
     def _draw_expression(self, painter: QPainter, state: PetState) -> None:
         expression = state.expression
         if expression == "neutral" or expression == "sleepy":

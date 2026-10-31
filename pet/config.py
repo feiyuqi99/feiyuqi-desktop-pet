@@ -25,6 +25,8 @@ class Settings:
     always_on_top: bool = True
     perception: bool = True
     chattiness: str = "normal"
+    throwable: bool = True
+    music: bool = True
 
 
 @dataclass
@@ -92,7 +94,14 @@ def _load_settings(raw: Any) -> Settings:
                 setattr(settings, key, raw[key])
     if settings.chattiness not in CHATTINESS:
         settings.chattiness = "normal"
-    for key in ("sit_reminder", "hourly_chime", "always_on_top", "perception"):
+    for key in (
+        "sit_reminder",
+        "hourly_chime",
+        "always_on_top",
+        "perception",
+        "throwable",
+        "music",
+    ):
         setattr(settings, key, bool(getattr(settings, key)))
     return settings
 

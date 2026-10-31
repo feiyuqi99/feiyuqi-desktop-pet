@@ -19,7 +19,7 @@ def test_roundtrip(tmp_path):
         home_y=400,
         outfit="casual",
         mood=42,
-        settings=Settings(chattiness="chatty", perception=False),
+        settings=Settings(chattiness="chatty", perception=False, throwable=False, music=False),
         pomodoro=Pomodoro(phase="focus", ends_at=12345.0),
     )
     save_config(config, path)
@@ -32,6 +32,8 @@ def test_roundtrip(tmp_path):
     assert loaded.mood == 42
     assert loaded.settings.chattiness == "chatty"
     assert loaded.settings.perception is False
+    assert loaded.settings.throwable is False
+    assert loaded.settings.music is False
     assert loaded.pomodoro.phase == "focus"
     assert loaded.pomodoro.ends_at == 12345.0
 

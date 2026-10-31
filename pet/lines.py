@@ -399,6 +399,23 @@ LINES: list[Line] = [
     L("这种话我只说一次。……好吧，可能不止一次。", "affection", "familiar"),
     L("我等你回来，等得有点久。", "affection", "close"),
     L("我不知道这算什么。反正你在的时候，我心情很好。", "affection", "close"),
+    # 音乐
+    L("这歌……不错。", "music_start"),
+    L("前奏一响，我就醒了。", "music_start"),
+    L("你放的歌，我听着。", "music_start"),
+    L("这个节奏，我喜欢。", "music_start", "familiar"),
+    L("……副歌不错。", "music"),
+    L("别切，正听到一半。", "music"),
+    L("低音有点震。", "music"),
+    L("听着歌，时间过得快。", "music"),
+    L("你在哼什么？", "music", "familiar"),
+    L("我想跟着晃，但会站不稳。", "music"),
+    L("这首让我想起下午。", "music", "close"),
+    L("换一首？不换也行。", "music"),
+    L("歌停了。", "music_end"),
+    L("刚才那首，还行。", "music_end"),
+    L("安静下来，有点空。", "music_end", "close"),
+    L("下次放点快的。", "music_end", "familiar"),
 ]
 
 
