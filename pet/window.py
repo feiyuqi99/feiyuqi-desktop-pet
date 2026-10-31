@@ -256,7 +256,7 @@ class PetWindow(QWidget):
         pixmap = self.sprites.get(self.outfit, state.frame)
         painter.save()
         painter.translate(FEET_X, FEET_Y + state.bob + state.hop)
-        painter.rotate(state.tilt + self._hover_tilt + state.spin)
+        painter.rotate(state.tilt + self._hover_tilt)
         painter.scale(
             state.facing * state.scale * state.squash_x,
             state.scale * state.squash_y,

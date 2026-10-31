@@ -63,7 +63,6 @@ class PetState:
     move_speed: float = 0.0
     expression: str = "neutral"
     hop: float = 0.0
-    spin: float = 0.0
     squash_x: float = 1.0
     squash_y: float = 1.0
 
@@ -106,7 +105,6 @@ class Behavior:
         self.hop_started = 0.0
         self.hop_until = 0.0
         self.hop_height = 0.0
-        self.spin_until = 0.0
         self.squash_until = 0.0
 
     def _ensure_timers(self, now: float) -> None:
@@ -143,9 +141,6 @@ class Behavior:
         self.hop_started = now
         self.hop_until = now + 0.42
         self.hop_height = height
-
-    def _spin(self, now: float) -> None:
-        self.spin_until = now + 0.55
 
     def _wake(self, ctx: BehaviorContext, greeting: str = "wake") -> None:
         self.mode = IDLE
@@ -219,8 +214,7 @@ class Behavior:
         self.mode = POKE
         self.mode_until = now + 1.4
         self.next_wander = now + self.rng.uniform(30, 90)
-        self._hop(now, 13.0)
-        self._spin(now)
+        self._hop(now, 9.0)
         self._set_expression("sparkle", now + 1.4)
         self._queue("double")
 
@@ -425,11 +419,6 @@ class Behavior:
             progress = (now - self.hop_started) / max(0.001, self.hop_until - self.hop_started)
             hop = -self.hop_height * math.sin(math.pi * max(0.0, min(1.0, progress)))
 
-        spin = 0.0
-        if now < self.spin_until:
-            progress = max(0.0, min(1.0, 1.0 - (self.spin_until - now) / 0.55))
-            spin = 360.0 * (progress * progress * (3.0 - 2.0 * progress))
-
         squash_x = 1.0
         squash_y = 1.0
         if now < self.squash_until:
@@ -460,7 +449,6 @@ class Behavior:
             move_speed=speed,
             expression=expression,
             hop=hop,
-            spin=spin,
             squash_x=squash_x,
             squash_y=squash_y,
         )

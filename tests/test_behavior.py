@@ -81,12 +81,12 @@ def test_feet_click_hops():
     assert state.expression == "surprised"
 
 
-def test_double_click_spins_and_hops():
+def test_double_click_hops():
     b = Behavior(random.Random(24))
     b.on_double_click(DAY)
     state = b.tick(ctx(DAY + 0.1))
-    assert state.spin > 0
     assert state.hop < 0
+    assert state.expression == "sparkle"
 
 
 def test_landing_squashes():
