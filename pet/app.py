@@ -254,7 +254,7 @@ class PetApp(QObject):
             if self.behavior.mode == "drag" or self._flying:
                 self._request_scan(now, 0.8)
             elif self._input_host:
-                self._request_scan(now, 1.5, self._input_host)
+                self._request_scan(now, 3.0, self._input_host)
             if self.behavior.mode == "drag":
                 vx, vy = self.window.drag_velocity()
                 self.behavior.set_drag_motion(vx, vy)
