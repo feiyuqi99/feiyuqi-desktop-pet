@@ -126,10 +126,16 @@ def test_face_poke_recoils_then_returns():
 
 def test_high_five_raises_arm_and_relaxes():
     motion = RigMotion()
-    advance(motion, PetState(mode="poke", expression="sparkle"), 0.7)
+    advance(motion, PetState(mode="pet", expression="sparkle"), 0.7)
     assert motion.arm.value > 0.7
     advance(motion, PetState(mode="idle", expression="neutral"), 2.0, start=200.0)
     assert motion.arm.value < 0.2
+
+
+def test_music_sparkle_does_not_raise_arm():
+    motion = RigMotion()
+    advance(motion, PetState(mode="idle", expression="sparkle"), 1.0)
+    assert motion.arm.value < 0.1
 
 
 def test_dragging_makes_legs_dangle():

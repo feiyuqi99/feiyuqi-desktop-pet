@@ -183,7 +183,11 @@ class RigMotion:
         self.hair_dx.step(dt, hair_dx_target, limit=2.0)
         self.body_angle.step(dt, body_target, stiffness=45.0, damping=10.0, limit=0.8)
         self.leg.step(dt, leg_target, stiffness=60.0, damping=12.0, limit=6.0)
-        arm_target = 1.0 if expression == "sparkle" else 0.0
+        arm_target = (
+            1.0
+            if expression == "sparkle" and state.mode in ("pet", "poke")
+            else 0.0
+        )
         self.arm.step(dt, arm_target, stiffness=90.0, damping=13.0, limit=1.2)
         scale_target = 0.96 if expression == "heart" else 1.0
         self.head_scale += (scale_target - self.head_scale) * min(1.0, dt * 12.0)
