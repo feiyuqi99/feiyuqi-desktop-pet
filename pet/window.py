@@ -38,7 +38,7 @@ class PetWindow(QWidget):
     clicked = Signal(str)
     double_clicked = Signal()
     drag_started = Signal()
-    drag_finished = Signal(float)
+    drag_finished = Signal(float, float)
     interacted = Signal()
 
     def __init__(self, sprites: SpriteLibrary, menu_factory=None) -> None:
@@ -117,16 +117,16 @@ class PetWindow(QWidget):
         velocity = (p1.x() - p0.x()) / dt
         return max(-10.0, min(10.0, -velocity * 0.02))
 
-    def _drag_speed(self) -> float:
+    def drag_velocity(self) -> tuple[float, float]:
         now = time.monotonic()
         while self._moves and now - self._moves[0][0] > 0.15:
             self._moves.popleft()
         if len(self._moves) < 2:
-            return 0.0
+            return 0.0, 0.0
         t0, p0 = self._moves[0]
         t1, p1 = self._moves[-1]
         dt = max(0.001, t1 - t0)
-        return (p1.x() - p0.x()) / dt
+        return (p1.x() - p0.x()) / dt, (p1.y() - p0.y()) / dt
 
     def _emit_click(self) -> None:
         self.clicked.emit(self._pending_part)
@@ -178,10 +178,10 @@ class PetWindow(QWidget):
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             if self._dragging:
-                speed = self._drag_speed()
+                vx, vy = self.drag_velocity()
                 self._dragging = False
                 self.setCursor(Qt.ArrowCursor)
-                self.drag_finished.emit(speed)
+                self.drag_finished.emit(vx, vy)
             elif self._double:
                 self._double = False
             else:

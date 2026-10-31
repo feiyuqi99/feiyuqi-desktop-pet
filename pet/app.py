@@ -99,8 +99,10 @@ class PetApp(QObject):
         self._first_greeted = False
         self._error_shown = False
         self._pstate = PerceptionState()
-        self._falling = False
-        self._fall_vy = 0.0
+        self._flying = False
+        self._vx = 0.0
+        self._vy = 0.0
+        self._grounded = False
         self._fall_target = 0.0
         self._support_check_at = 0.0
 
@@ -199,6 +201,9 @@ class PetApp(QObject):
         self.window.move(x, y)
         self.config.x = x
         self.config.y = y
+        if self.config.home_x is None or self.config.home_y is None:
+            self.config.home_x = x
+            self.config.home_y = y
 
     def _screen_geometry(self):
         screen = QGuiApplication.screenAt(self.window.frameGeometry().center())
@@ -249,8 +254,8 @@ class PetApp(QObject):
                 x = self.window.x() + int(round(state.move_speed * dt))
                 x = max(geometry.left(), min(x, geometry.right() - self.window.width()))
                 self.window.move(x, self.window.y())
-            if self._falling and self.window.isVisible():
-                self._step_fall(dt, now)
+            if self._flying and self.window.isVisible():
+                self._step_flight(dt, now, geometry)
             self._check_support(now, geometry)
             self.window.apply_state(state)
             if self.window.isVisible():
@@ -401,6 +406,11 @@ class PetApp(QObject):
             self._handle_speech(speech, 6200, priority=True)
         if alert.kind in ("pomo_end", "pomo_break_end", "pomo_missed"):
             self._beep()
+            if not self.window.isVisible():
+                message = speech.text if speech is not None else "时间到了。"
+                self.tray.showMessage(
+                    "小橘", message, QSystemTrayIcon.Information, 6000
+                )
         if alert.kind == "pomo_end":
             self.config.mood = change(self.config.mood, 8)
             self.config.mood_updated_at = ctx.now
@@ -461,6 +471,10 @@ class PetApp(QObject):
 
     def _on_drag_started(self) -> None:
         now = time.time()
+        self._flying = False
+        self._grounded = False
+        self._vx = 0.0
+        self._vy = 0.0
         self._on_interacted()
         self.behavior.on_drag_start(now)
         ctx = self._context(now)
@@ -468,33 +482,39 @@ class PetApp(QObject):
             if action.kind == "speak":
                 self._speak(action.event, ctx)
 
-    def _on_drag_finished(self, speed: float) -> None:
+    def _on_drag_finished(self, vx: float, vy: float) -> None:
         now = time.time()
-        self.behavior.on_drag_end(now, speed)
+        self.behavior.on_drag_end(now, vx)
         self.memory.add_interaction()
         self._bump_affection()
-        if abs(speed) > 1500:
+        if abs(vx) > 1500:
             self.config.mood = change(self.config.mood, -2)
             self.config.mood_updated_at = now
         geometry = self._screen_geometry()
         feet = self.window.y() + FEET_Y
         floor_feet = self._feet_floor(geometry)
-        if abs(speed) < 2200:
-            center = self.window.x() + self.window.width() // 2
-            top = support.support_at(center, feet, self._exclude_hwnds())
-            if top is not None:
-                self.window.move(self.window.x(), int(round(top - FEET_Y)))
-                self._falling = False
-                self._fall_vy = 0.0
-                self.behavior.land(now)
-            else:
-                surface = self._surface_below(feet, floor_feet)
-                target = floor_feet if surface is None else float(surface)
-                if target > feet + 6:
-                    self._falling = True
-                    self._fall_vy = 0.0
-                    self._fall_target = target
-                    self.behavior.start_fall(now)
+        center = self.window.x() + self.window.width() // 2
+        top = support.support_at(center, feet, self._exclude_hwnds())
+        if top is not None:
+            target = float(top)
+        else:
+            surface = self._surface_below(feet, floor_feet)
+            target = floor_feet if surface is None else float(surface)
+        calm = abs(vx) < 80 and abs(vy) < 80
+        if calm and top is not None:
+            self.window.move(self.window.x(), int(round(target - FEET_Y)))
+            self._flying = False
+            self._grounded = False
+            self._vx = 0.0
+            self._vy = 0.0
+            self.behavior.land(now)
+        else:
+            self._flying = True
+            self._grounded = False
+            self._vx = max(-1800.0, min(1800.0, vx))
+            self._vy = max(-1600.0, min(1600.0, vy))
+            self._fall_target = target
+            self.behavior.start_fall(now)
         self._support_check_at = now + 0.4
         ctx = self._context(now)
         for action in self.behavior.drain():
@@ -518,28 +538,74 @@ class PetApp(QObject):
     def _begin_fall(self, now: float, feet: float, floor_feet: float) -> None:
         surface = self._surface_below(feet, floor_feet)
         self._fall_target = floor_feet if surface is None else float(surface)
-        self._falling = True
-        self._fall_vy = 0.0
+        self._flying = True
+        self._grounded = False
+        self._vy = 0.0
         self.behavior.start_fall(now)
 
-    def _step_fall(self, dt: float, now: float) -> None:
-        self._fall_vy = min(1500.0, self._fall_vy + 2200.0 * dt)
-        y = self.window.y() + self._fall_vy * dt
+    def _step_flight(self, dt: float, now: float, geometry) -> None:
+        dt = min(dt, 0.05)
+        if self._vx:
+            x = self.window.x() + self._vx * dt
+            left = geometry.left()
+            right = geometry.right() - self.window.width()
+            if x < left:
+                x = left
+                self._vx = -self._vx * 0.45
+            elif x > right:
+                x = right
+                self._vx = -self._vx * 0.45
+            self.window.move(int(round(x)), self.window.y())
+            decay = 5.0 if self._grounded else 0.5
+            self._vx *= max(0.0, 1.0 - decay * dt)
+            if abs(self._vx) < 12.0:
+                self._vx = 0.0
+
+        if self._grounded:
+            if now >= self._support_check_at:
+                self._support_check_at = now + 0.12
+                feet = self.window.y() + FEET_Y
+                center = self.window.x() + self.window.width() // 2
+                if support.support_at(center, feet, self._exclude_hwnds()) is None:
+                    self._grounded = False
+                    floor_feet = self._feet_floor(geometry)
+                    surface = self._surface_below(feet, floor_feet)
+                    self._fall_target = floor_feet if surface is None else float(surface)
+                    self.behavior.start_fall(now)
+                    return
+            if not self._vx:
+                self._flying = False
+            return
+
+        previous = self._vy
+        self._vy = min(1800.0, self._vy + 2400.0 * dt)
+        if previous < 0.0 <= self._vy:
+            surface = self._surface_below(
+                self.window.y() + FEET_Y, self._feet_floor(geometry)
+            )
+            if surface is not None:
+                self._fall_target = float(surface)
+        y = self.window.y() + self._vy * dt
+        if y < geometry.top():
+            y = geometry.top()
+            self._vy = -self._vy * 0.35
         target_y = self._fall_target - FEET_Y
-        if y >= target_y:
+        if y >= target_y and self._vy > 0:
             y = target_y
-            if self._fall_vy > 420.0:
-                self._fall_vy = -self._fall_vy * 0.33
+            if self._vy > 520.0:
+                self._vy = -self._vy * 0.32
                 self.behavior.bounce(now)
             else:
-                self._falling = False
-                self._fall_vy = 0.0
+                self._vy = 0.0
+                self._grounded = True
                 self.behavior.land(now)
-                self._support_check_at = now + 0.4
+                self._support_check_at = now + 0.12
+                if not self._vx:
+                    self._flying = False
         self.window.move(self.window.x(), int(round(y)))
 
     def _check_support(self, now: float, geometry) -> None:
-        if not self.window.isVisible() or self._falling or self.behavior.mode == "drag":
+        if not self.window.isVisible() or self._flying or self.behavior.mode == "drag":
             return
         if now < self._support_check_at:
             return
@@ -606,8 +672,10 @@ class PetApp(QObject):
 
     def _toggle_visibility(self) -> None:
         if self.window.isVisible():
-            self._falling = False
-            self._fall_vy = 0.0
+            self._flying = False
+            self._grounded = False
+            self._vx = 0.0
+            self._vy = 0.0
             self.window.hide()
             self.bubble.hide()
         else:
@@ -673,6 +741,10 @@ class PetApp(QObject):
         action.triggered.connect(self._quiet_30)
         action = menu.addAction("给我起个名字")
         action.triggered.connect(self._rename)
+        action = menu.addAction("记住这个位置")
+        action.triggered.connect(self._set_home)
+        action = menu.addAction("回到原位")
+        action.triggered.connect(self._go_home)
 
         if full:
             menu.addSeparator()
@@ -814,6 +886,29 @@ class PetApp(QObject):
         self.config.quiet_until = time.time() + 30 * 60
         self._save_state()
         self._speak("quiet", self._context(time.time()), force=True)
+
+    def _set_home(self) -> None:
+        self.config.home_x = self.window.x()
+        self.config.home_y = self.window.y()
+        self._save_state()
+        self._direct_bubble("好，这里就是家。")
+
+    def _go_home(self) -> None:
+        geometry = self._screen_geometry()
+        home_x = self.config.home_x
+        home_y = self.config.home_y
+        if home_x is None or home_y is None:
+            home_x = geometry.right() - self.window.width() - 24
+            home_y = geometry.bottom() - self.window.height() - 12
+        x = max(geometry.left(), min(home_x, geometry.right() - self.window.width()))
+        y = max(geometry.top(), min(home_y, geometry.bottom() - self.window.height()))
+        self._flying = False
+        self._grounded = False
+        self._vx = 0.0
+        self._vy = 0.0
+        self.window.move(x, y)
+        self._support_check_at = 0.0
+        self._direct_bubble("回来了。")
 
     def _rename(self) -> None:
         text, ok = QInputDialog.getText(

@@ -38,6 +38,8 @@ class Config:
     version: int = 1
     x: int | None = None
     y: int | None = None
+    home_x: int | None = None
+    home_y: int | None = None
     outfit: str = "maid"
     mood: int = 70
     mood_updated_at: float = field(default_factory=time.time)
@@ -125,6 +127,10 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         config.x = raw["x"]
     if isinstance(raw.get("y"), int):
         config.y = raw["y"]
+    if isinstance(raw.get("home_x"), int):
+        config.home_x = raw["home_x"]
+    if isinstance(raw.get("home_y"), int):
+        config.home_y = raw["home_y"]
     if raw.get("outfit") in OUTFITS:
         config.outfit = raw["outfit"]
     if isinstance(raw.get("mood"), (int, float)):

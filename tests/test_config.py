@@ -15,6 +15,8 @@ def test_roundtrip(tmp_path):
     config = Config(
         x=100,
         y=200,
+        home_x=300,
+        home_y=400,
         outfit="casual",
         mood=42,
         settings=Settings(chattiness="chatty", perception=False),
@@ -24,6 +26,8 @@ def test_roundtrip(tmp_path):
     loaded = load_config(path)
     assert loaded.x == 100
     assert loaded.y == 200
+    assert loaded.home_x == 300
+    assert loaded.home_y == 400
     assert loaded.outfit == "casual"
     assert loaded.mood == 42
     assert loaded.settings.chattiness == "chatty"
