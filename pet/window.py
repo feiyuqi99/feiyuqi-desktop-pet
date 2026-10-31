@@ -30,6 +30,7 @@ from .animation import (
     part_at,
 )
 from .behavior import PetState
+from .rig import RigLibrary
 from .win_effects import apply_clean_window
 
 ICON_PATH = Path(__file__).resolve().parent.parent / "assets" / "icons" / "pet.ico"
@@ -61,6 +62,9 @@ class PetWindow(QWidget):
         self._press_global = QPoint()
         self._drag_offset = QPoint()
         self._moves: deque[tuple[float, QPoint]] = deque()
+        self._rig_library = RigLibrary()
+        self._rig = None
+        self._last_paint = time.monotonic()
 
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
@@ -83,6 +87,7 @@ class PetWindow(QWidget):
 
     def set_outfit(self, outfit: str) -> None:
         self.outfit = outfit
+        self._rig = self._rig_library.get(outfit) if outfit == "casual" else None
         self.update()
 
     def set_always_on_top(self, enabled: bool) -> None:
@@ -240,7 +245,10 @@ class PetWindow(QWidget):
             )
         )
 
-        pixmap = self.sprites.get(self.outfit, state.frame)
+        now = time.monotonic()
+        dt = max(0.0, min(0.05, now - self._last_paint))
+        self._last_paint = now
+
         painter.save()
         painter.translate(FEET_X, FEET_Y + state.bob + state.hop)
         painter.rotate(state.tilt + self._hover_tilt)
@@ -248,14 +256,24 @@ class PetWindow(QWidget):
             state.facing * state.scale * state.squash_x,
             state.scale * state.squash_y,
         )
-        painter.drawPixmap(
-            QRectF(-DRAW_SIZE / 2, -FEET_Y, DRAW_SIZE, DRAW_SIZE),
-            pixmap,
-            QRectF(0, 0, pixmap.width(), pixmap.height()),
-        )
-        painter.scale(DISPLAY_SCALE, DISPLAY_SCALE)
-        painter.translate(-SPRITE_FEET_X, -SPRITE_FEET_Y)
-        self._draw_expression(painter, state)
+        if self._rig is not None:
+            self._rig.draw(
+                painter,
+                state,
+                now,
+                dt,
+                lambda target: self._draw_expression(target, state),
+            )
+        else:
+            pixmap = self.sprites.get(self.outfit, state.frame)
+            painter.drawPixmap(
+                QRectF(-DRAW_SIZE / 2, -FEET_Y, DRAW_SIZE, DRAW_SIZE),
+                pixmap,
+                QRectF(0, 0, pixmap.width(), pixmap.height()),
+            )
+            painter.scale(DISPLAY_SCALE, DISPLAY_SCALE)
+            painter.translate(-SPRITE_FEET_X, -SPRITE_FEET_Y)
+            self._draw_expression(painter, state)
         painter.restore()
 
         if state.zzz:
