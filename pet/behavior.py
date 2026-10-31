@@ -98,6 +98,9 @@ class Behavior:
         self.stretch_until = 0.0
         self.wobble_until = 0.0
         self.drag_tilt = 0.0
+        self.drag_vy = 0.0
+        self.drag_started_at = 0.0
+        self.drag_holder_notified = False
         self.last_activity = "other"
         self.pending: list[Action] = []
         self.expression = "neutral"
@@ -130,8 +133,10 @@ class Behavior:
             self.wander_pause_at = 0.0
             self.wander_pause_until = 0.0
 
-    def set_drag_tilt(self, tilt: float) -> None:
-        self.drag_tilt = max(-10.0, min(10.0, tilt))
+    def set_drag_motion(self, vx: float, vy: float) -> None:
+        target = max(-12.0, min(12.0, -vx * 0.02))
+        self.drag_tilt += (target - self.drag_tilt) * 0.35
+        self.drag_vy = vy
 
     def _set_expression(self, name: str, until: float) -> None:
         self.expression = name
@@ -224,6 +229,9 @@ class Behavior:
         self.mode = DRAG
         self.mode_until = 0.0
         self.drag_tilt = 0.0
+        self.drag_vy = 0.0
+        self.drag_started_at = now
+        self.drag_holder_notified = False
         self.hop_until = 0.0
         self._set_expression("surprised", now + 1.4)
         self._queue("drag_start")
@@ -370,7 +378,10 @@ class Behavior:
         else:
             frame = "idle"
 
-        if self.mode in (DRAG, FALL):
+        drag_held = now - self.drag_started_at if self.mode == DRAG else 0.0
+        if self.mode == DRAG:
+            bob = math.sin(now * math.tau * 2.2) * 1.8 if drag_held > 1.6 else 0.0
+        elif self.mode == FALL:
             bob = 0.0
         elif self.mode in (SLEEP, NAP):
             bob = math.sin(now * math.tau / 6.0) * 1.2
@@ -382,6 +393,11 @@ class Behavior:
         tilt = 0.0
         if self.mode == DRAG:
             tilt = self.drag_tilt
+            if drag_held > 1.6:
+                tilt += math.sin(now * math.tau * 2.4) * 2.2
+                if not self.drag_holder_notified and drag_held > 2.4:
+                    self.drag_holder_notified = True
+                    self._queue("drag_hold")
         elif self.mode in (ANNOYED, FALL):
             tilt = 0.0
         elif self.micro_kind == "look_left":
@@ -412,7 +428,7 @@ class Behavior:
         elif self.mode == ANNOYED:
             expression = "annoyed"
         elif self.mode == DRAG:
-            expression = "surprised"
+            expression = "annoyed" if drag_held > 1.8 else "surprised"
 
         hop = 0.0
         if self.hop_started < self.hop_until and now < self.hop_until:
@@ -426,6 +442,15 @@ class Behavior:
             ease = (1.0 - progress) ** 2
             squash_y = 1.0 - 0.14 * ease
             squash_x = 1.0 + 0.09 * ease
+
+        if self.mode == DRAG:
+            drag_stretch = max(0.0, min(0.12, abs(self.drag_vy) / 4000.0))
+            squash_y = 1.0 + drag_stretch
+            squash_x = 1.0 - drag_stretch * 0.5
+            if drag_held > 1.6:
+                pulse = 0.012 * math.sin(now * math.tau * 5.0)
+                squash_y += pulse
+                squash_x -= pulse * 0.5
 
         if self.mode == ANNOYED:
             facing = -1

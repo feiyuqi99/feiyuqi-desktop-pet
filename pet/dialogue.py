@@ -14,6 +14,7 @@ ALERT_EVENTS = {"hourly", "sit", "pomo_start", "pomo_break", "pomo_end", "pomo_b
 UNSOLICITED_EVENTS = {
     "idle",
     "coding",
+    "affection",
     "late_night",
     "late_streak",
     "meeting_end",

@@ -164,3 +164,19 @@ def test_drag_fast_wobble():
     state = b.tick(ctx(DAY + 2))
     assert b.mode == behavior.IDLE
     assert state is not None
+
+
+def test_drag_hold_struggles():
+    b = Behavior(random.Random(9))
+    b.on_drag_start(DAY)
+    b.drain()
+    b.set_drag_motion(800.0, -400.0)
+    state = b.tick(ctx(DAY + 0.1))
+    assert state.expression == "surprised"
+    assert state.tilt < 0
+    assert state.squash_y > 1.0
+    state = b.tick(ctx(DAY + 2.5))
+    assert state.expression == "annoyed"
+    assert [action.event for action in b.drain()] == ["drag_hold"]
+    b.tick(ctx(DAY + 2.6))
+    assert b.drain() == []

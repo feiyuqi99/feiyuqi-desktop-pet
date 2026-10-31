@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import sys
 import threading
 import time
@@ -245,7 +246,9 @@ class PetApp(QObject):
             )
             ctx = self._context(now)
             geometry = self._screen_geometry()
-            self.behavior.set_drag_tilt(self.window.drag_tilt_value())
+            if self.behavior.mode == "drag":
+                vx, vy = self.window.drag_velocity()
+                self.behavior.set_drag_motion(vx, vy)
             behavior_ctx = BehaviorContext(
                 now=now,
                 time_band=ctx.time_band,
@@ -274,7 +277,8 @@ class PetApp(QObject):
 
             for action in self.behavior.drain():
                 if action.kind == "speak":
-                    self._speak(action.event, ctx)
+                    held = action.event == "drag_hold" and not ctx.quiet
+                    self._speak(action.event, ctx, force=held, priority=held)
 
             for alert in self.companion.tick(now):
                 self._alert_speak(alert, ctx)
@@ -369,6 +373,12 @@ class PetApp(QObject):
             "late_streak", 1, ctx.now
         ):
             event = "late_streak"
+        elif (
+            (self.memory.relationship != "new" or self.memory.affection >= 12)
+            and ctx.mood >= 55
+            and random.random() < 0.15
+        ):
+            event = "affection"
         elif ctx.activity == "coding":
             event = "coding"
         self._speak(event, ctx)
@@ -384,11 +394,18 @@ class PetApp(QObject):
             return
         self._speak(event, ctx)
 
-    def _speak(self, event: str, ctx: DialogueContext, force: bool = False, hold: int = 4200):
+    def _speak(
+        self,
+        event: str,
+        ctx: DialogueContext,
+        force: bool = False,
+        hold: int = 4200,
+        priority: bool = False,
+    ):
         speech = self.dialogue.maybe_speak(event, ctx, force=force)
         if speech is None:
             return None
-        self._handle_speech(speech, hold)
+        self._handle_speech(speech, hold, priority)
         if event == "late_streak":
             self.memory.record_event("late_streak", ctx.now)
         if event.startswith("anniversary_"):

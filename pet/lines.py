@@ -91,6 +91,10 @@ LINES: list[Line] = [
     L("谢谢。", "pet", "low"),
     L("嘿嘿。", "pet", "happy"),
     L("摸头要给钱的。", "pet", "familiar"),
+    L("喜欢你。……别告诉别人。", "pet", "close"),
+    L("再摸一会儿。", "pet", "close"),
+    L("我想你了。", "pet", "close"),
+    L("你手心的温度，我记住了。", "pet", "close"),
     # 双击
     L("干嘛。", "double"),
     L("两次了。", "double"),
@@ -154,6 +158,12 @@ LINES: list[Line] = [
     L("……我要生气了。", "drag_fast"),
     L("停一下，停一下。", "drag_fast"),
     L("再快就晕了。", "drag_fast"),
+    # 拎太久
+    L("放我下来。", "drag_hold"),
+    L("你打算拎多久。", "drag_hold"),
+    L("我又不是挂件。", "drag_hold"),
+    L("头晕。", "drag_hold"),
+    L("再晃就真生气了。", "drag_hold", "familiar"),
     # 漫步
     L("走到这儿。", "wander_end"),
     L("这边风景一般。", "wander_end"),
@@ -369,6 +379,26 @@ LINES: list[Line] = [
     L("这段写得很慢。……没关系，慢也是写。", "coding"),
     L("报错了？我假装没看见。", "coding"),
     L("打字速度上来了。", "coding"),
+    # 亲昵
+    L("……我想你了。别问为什么。", "affection"),
+    L("有点喜欢你。就一点点，别得意。", "affection"),
+    L("你不说话的时候，我也在想你。", "affection"),
+    L("嗯，我承认。喜欢待在你旁边。", "affection"),
+    L("我想你了。……就一点点。", "affection", "close"),
+    L("没什么事，就是想看看你。", "affection", "close"),
+    L("喜欢你，是我自己决定的。", "affection", "close"),
+    L("有你在这儿，桌面没那么冷清。", "affection", "close"),
+    L("别笑。我是认真的。", "affection", "close"),
+    L("我好像有点黏人。", "affection", "familiar"),
+    L("你忙你的，我就是想你了。", "affection", "close"),
+    L("如果有一天你换电脑，记得带我走。", "affection", "close"),
+    L("喜欢。……听见了就当没听见吧。", "affection", "close"),
+    L("我不太会说这种话。", "affection", "close"),
+    L("今天也想你了。", "affection", "close"),
+    L("你回来的时候，我会先看见你。", "affection", "close"),
+    L("这种话我只说一次。……好吧，可能不止一次。", "affection", "familiar"),
+    L("我等你回来，等得有点久。", "affection", "close"),
+    L("我不知道这算什么。反正你在的时候，我心情很好。", "affection", "close"),
 ]
 
 

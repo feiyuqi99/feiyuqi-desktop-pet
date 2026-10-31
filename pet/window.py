@@ -104,20 +104,6 @@ class PetWindow(QWidget):
             return None
         return part_at(sx, sy)
 
-    def drag_tilt_value(self) -> float:
-        if not self._dragging:
-            return 0.0
-        now = time.monotonic()
-        while self._moves and now - self._moves[0][0] > 0.15:
-            self._moves.popleft()
-        if len(self._moves) < 2:
-            return 0.0
-        t0, p0 = self._moves[0]
-        t1, p1 = self._moves[-1]
-        dt = max(0.001, t1 - t0)
-        velocity = (p1.x() - p0.x()) / dt
-        return max(-10.0, min(10.0, -velocity * 0.02))
-
     def drag_velocity(self) -> tuple[float, float]:
         now = time.monotonic()
         while self._moves and now - self._moves[0][0] > 0.15:
