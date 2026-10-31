@@ -1,0 +1,298 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Line:
+    text: str
+    event: str
+    tags: frozenset[str] = frozenset()
+    weight: float = 1.0
+
+
+def L(text: str, event: str, *tags: str, weight: float = 1.0) -> Line:
+    return Line(text, event, frozenset(tags), weight)
+
+
+LINES: list[Line] = [
+    # 初次见面
+    L("你好。……我就住这儿了，叫我小橘吧。", "greet_first"),
+    L("第一次见面。我不太会说话，先这样待着。", "greet_first"),
+    L("嗯，你就是这里的人吧。我先看看。", "greet_first"),
+    L("我来了。以后请多指教。", "greet_first"),
+    # 启动问候
+    L("又见面了。今天也请多指教。", "greet"),
+    L("我来了。……你继续忙你的。", "greet"),
+    L("早上好。", "greet", "morning"),
+    L("早。今天也慢慢来。", "greet", "morning"),
+    L("午安。吃过饭了吗。", "greet", "noon"),
+    L("下午了。", "greet", "afternoon"),
+    L("晚上好。", "greet", "evening"),
+    L("这个点还醒着？", "greet", "late_hours"),
+    L("周末也不休息吗？", "greet", "weekend"),
+    L("我回来了。……哦，是我来了。", "greet"),
+    L("嗯。我在这儿。", "greet"),
+    # 离开后回来
+    L("你回来了。刚才有点安静。", "greet_return", "familiar"),
+    L("回来了？我差点睡着了。", "greet_return", "familiar"),
+    L("嗯，你回来了。……我没在等你，只是刚好醒着。", "greet_return", "close"),
+    L("欢迎回来。", "greet_return"),
+    L("刚才去哪儿了。……不说也没关系。", "greet_return", "close"),
+    L("水喝了吗？", "greet_return", "close"),
+    L("你回来了。桌面还是老样子。", "greet_return"),
+    # 很久没见
+    L("好久不见。……我还以为你换电脑了。", "greet_long"),
+    L("你回来了。桌面有点灰。", "greet_long"),
+    L("三天没见。……我也没数。", "greet_long"),
+    L("我还在这儿。", "greet_long"),
+    L("有点想你。……就一点。", "greet_long", "close"),
+    L("好久不见。我还以为你把我忘了。", "greet_long", "familiar"),
+    # 主动闲聊
+    L("……", "idle"),
+    L("今天天气怎么样？我看不到外面。", "idle"),
+    L("你要是累了，就歇一会儿。", "idle"),
+    L("我在这儿。", "idle"),
+    L("屏幕有点亮。", "idle"),
+    L("安静一会儿也挺好。", "idle"),
+    L("键盘声挺好听的。", "idle", "coding"),
+    L("看了很久了。眼睛还好吗？", "idle", "browser"),
+    L("这个点，别撑太久。", "idle", "late_hours"),
+    L("今天你心情不错？", "idle", "happy"),
+    L("……我有点没精神。", "idle", "low"),
+    L("你忙你的，我发会儿呆。", "idle", "close"),
+    L("窗外应该天黑了吧。", "idle", "evening"),
+    L("我刚刚好像走神了。", "idle"),
+    L("嗯……没什么事，就是想出声。", "idle"),
+    # 戳（身体）
+    L("诶？", "click"),
+    L("嗯？", "click"),
+    L("怎么了。", "click"),
+    L("我在。", "click"),
+    L("别戳，会痒。", "click"),
+    L("有事就说。", "click"),
+    L("……看到了。", "click"),
+    L("你手很闲吗。", "click"),
+    L("代码卡住了？", "click", "coding"),
+    L("在开会？那我不说话。", "click", "meeting"),
+    L("……今天不太想动。", "click", "low"),
+    L("还不睡？", "click", "late_hours"),
+    L("要陪你一会儿吗。", "click", "close"),
+    L("戳一下两下就算了哦。", "click", "familiar"),
+    # 摸头
+    L("唔……可以再摸一下。", "pet"),
+    L("头发会乱的。", "pet"),
+    L("……嗯。", "pet"),
+    L("只准摸头。", "pet"),
+    L("你手很暖。", "pet"),
+    L("再摸就习惯了。", "pet"),
+    L("好乖好乖……是在说我吗。", "pet"),
+    L("……今天多摸一会儿也行。", "pet", "close"),
+    L("谢谢。", "pet", "low"),
+    L("嘿嘿。", "pet", "happy"),
+    L("摸头要给钱的。", "pet", "familiar"),
+    # 双击
+    L("干嘛。", "double"),
+    L("两次了。", "double"),
+    L("……你是想逗我笑吗。", "double"),
+    L("好吧，陪你一下。", "double"),
+    L("再点就成开关了。", "double"),
+    L("嗯，我在。", "double", "close"),
+    L("手速挺快。", "double"),
+    # 拖拽
+    L("哇——", "drag_start"),
+    L("轻一点。", "drag_start"),
+    L("要带我去哪儿。", "drag_start"),
+    L("我自己会走。", "drag_start"),
+    L("……别拎领子。", "drag_start"),
+    L("抓稳一点。", "drag_start", "close"),
+    L("放我下来。", "drag_end"),
+    L("到了？", "drag_end"),
+    L("头晕。", "drag_end"),
+    L("下次提前说一声。", "drag_end"),
+    L("这里也行。", "drag_end"),
+    L("谢谢，挺稳的。", "drag_end", "close"),
+    L("慢点，头会晕。", "drag_fast"),
+    L("你是在甩干吗。", "drag_fast"),
+    L("……我要生气了。", "drag_fast"),
+    L("停一下，停一下。", "drag_fast"),
+    L("再快就晕了。", "drag_fast"),
+    # 漫步
+    L("走到这儿。", "wander_end"),
+    L("这边风景一般。", "wander_end"),
+    L("活动一下。", "wander_end"),
+    L("……继续走？", "wander_end"),
+    L("腿有点短，走不快。", "wander_end"),
+    L("就停这儿吧。", "wander_end"),
+    # 醒来
+    L("……嗯？", "wake"),
+    L("我没睡，只是闭眼。", "wake"),
+    L("你回来了。", "wake"),
+    L("几点了。", "wake"),
+    L("再让我缓一下。", "wake"),
+    L("……别走。", "wake", "close"),
+    L("伸个懒腰。", "wake"),
+    # 闹脾气
+    L("……再戳就要生气了。", "annoyed"),
+    L("够了哦。", "annoyed"),
+    L("我转过去了。", "annoyed"),
+    L("让我安静一会儿。", "annoyed"),
+    L("你忙你的吧。", "annoyed"),
+    L("哼。", "annoyed"),
+    # 整点
+    L("{time} 了。喝口水吧。", "hourly"),
+    L("整点了。起来动一下。", "hourly"),
+    L("{time}。时间过得挺快。", "hourly"),
+    L("又过去一小时。", "hourly"),
+    L("报时：{time}。……我是不是很无聊。", "hourly"),
+    L("都 {time} 了。", "hourly", "late_hours"),
+    L("{time} 了，代码不会跑，人会累。", "hourly", "coding"),
+    L("{time}。还顺利吗。", "hourly", "familiar"),
+    # 久坐
+    L("坐了很久了，站起来伸个懒腰吧。", "sit"),
+    L("腰会疼的。", "sit"),
+    L("去接杯水？", "sit"),
+    L("我陪你站一会儿。", "sit"),
+    L("站起来，走两步。", "sit"),
+    L("别装没看见。", "sit"),
+    L("久坐提醒。……这次是真的很久。", "sit"),
+    # 番茄钟
+    L("25 分钟。我陪你。", "pomo_start"),
+    L("开始吧。我不吵你。", "pomo_start"),
+    L("专心。", "pomo_start"),
+    L("好，计时开始了。", "pomo_start"),
+    L("这 25 分钟归你。", "pomo_start"),
+    L("先休息五分钟。", "pomo_break"),
+    L("站起来，看看远处。", "pomo_break"),
+    L("喝水。", "pomo_break"),
+    L("别急着继续。", "pomo_break"),
+    L("休息也是正事。", "pomo_break"),
+    L("时间到。先站起来，别急着继续。", "pomo_end"),
+    L("25 分钟到了。", "pomo_end"),
+    L("做得不错。休息一下。", "pomo_end"),
+    L("停一下。眼睛也需要。", "pomo_end"),
+    L("结束了。你比刚才更专注了。", "pomo_end"),
+    L("休息结束了。要继续吗？", "pomo_break_end"),
+    L("五分钟到了。", "pomo_break_end"),
+    L("回来吧。", "pomo_break_end"),
+    L("继续也可以，不继续也可以。", "pomo_break_end"),
+    L("好，先停下。", "pomo_stop"),
+    L("嗯。休息一下。", "pomo_stop"),
+    L("计时取消了。", "pomo_stop"),
+    L("你不在的时候，专注已经结束了。", "pomo_missed"),
+    L("刚才的计时过去了。", "pomo_missed"),
+    # 换装
+    L("女仆装，还是这套最习惯。", "outfit_maid"),
+    L("换回来了。", "outfit_maid"),
+    L("裙摆有点重。", "outfit_maid"),
+    L("这样比较像在工作。", "outfit_maid"),
+    L("便服舒服多了。", "outfit_casual"),
+    L("别把我看成偷懒。", "outfit_casual"),
+    L("这样也行吧。", "outfit_casual"),
+    L("袖子有点长。", "outfit_casual"),
+    L("今天休息。", "outfit_casual", "weekend"),
+    # 深夜
+    L("这个点了。写完这段就睡吧。", "late_night"),
+    L("夜里安静，但人也容易累。", "late_night"),
+    L("我陪你一会儿，别太久。", "late_night"),
+    L("再熬就天亮了。", "late_night"),
+    L("水杯空了。", "late_night"),
+    L("代码明天还在，你先睡。", "late_night", "coding"),
+    L("我有点困了。……你呢。", "late_night", "close"),
+    # 连续熬夜
+    L("这周第三次了。我不是在管你，只是……算了。", "late_streak"),
+    L("你最近总是这个点。", "late_streak"),
+    L("再这样，我要生气了。……真的。", "late_streak"),
+    L("熬夜不会让代码变好。", "late_streak"),
+    L("我明天不提醒了。……还是会提醒。", "late_streak"),
+    # 写代码
+    L("又在写。我不吵你，就在旁边。", "coding"),
+    L("这段看起来很难。", "coding"),
+    L("卡住的话，起来走两步。", "coding"),
+    L("键盘声停了一下。", "coding"),
+    L("别一直盯着。", "coding"),
+    L("写完了吗？……没有啊。", "coding"),
+    L("慢一点也没关系。", "coding"),
+    L("今天也写了不少。", "coding", "evening"),
+    # 会议结束
+    L("会开完了？", "meeting_end"),
+    L("刚才很安静。", "meeting_end"),
+    L("说了好多话吧。", "meeting_end"),
+    L("耳朵累不累。", "meeting_end"),
+    L("结束了就歇会儿。", "meeting_end"),
+    # 纪念日
+    L("认识你七天了。……比我想的长一点。", "anniversary_7"),
+    L("第七天。没什么特别的，就是想说一声。", "anniversary_7"),
+    L("一周了。", "anniversary_7"),
+    L("一个月了。桌面还是这个桌面。", "anniversary_30"),
+    L("认识你三十天。……我记性还不错吧。", "anniversary_30"),
+    L("一个月。你还在。", "anniversary_30"),
+    L("一百天了。", "anniversary_100"),
+    L("一百天。你还在，我也还在。", "anniversary_100"),
+    L("一百天。……谢谢你没把我关掉。", "anniversary_100"),
+    # 问答
+    L("这个我还真不知道。", "unknown"),
+    L("你把我问住了。", "unknown"),
+    L("嗯……我不太懂。", "unknown"),
+    L("换个问题？", "unknown"),
+    # 退出
+    L("那我先睡了。明天见。", "exit"),
+    L("好，我关灯了。", "exit"),
+    L("明天见。", "exit"),
+    L("别熬太晚。", "exit"),
+    L("晚安。", "exit", "late_hours"),
+    # 安静
+    L("好，我安静一会儿。", "quiet"),
+    L("嗯。需要我就叫我。", "quiet"),
+    L("那我闭嘴。", "quiet"),
+    L("三十分钟。", "quiet"),
+    L("……", "quiet"),
+    # 称呼
+    L("一直「你」「你」地叫，有点生分了。要我怎么称呼你？", "name_ask"),
+    L("你叫什么？……不想说也行。", "name_ask"),
+    L("我该怎么叫你。", "name_ask"),
+    L("……好，我记住了。", "rename"),
+    L("这个名字不错。", "rename"),
+    L("嗯。以后就这么叫你。", "rename"),
+    # 感知
+    L("我会知道你在写代码还是在开会，但不会看内容。", "perception_on"),
+    L("只是看看前台程序，不读字。", "perception_on"),
+    L("这样我就能知道什么时候该安静。", "perception_on"),
+    L("好，那我不看了。", "perception_off"),
+    L("嗯。需要我知道的时候再说。", "perception_off"),
+    # 话量
+    L("好，我少说点。", "chattiness_quiet"),
+    L("嗯。", "chattiness_quiet"),
+    L("那我安静。", "chattiness_quiet"),
+    L("正常就好。", "chattiness_normal"),
+    L("嗯，这样刚好。", "chattiness_normal"),
+    L("那我多说点。", "chattiness_chatty"),
+    L("好啊。", "chattiness_chatty"),
+    L("你别嫌烦。", "chattiness_chatty"),
+    # 清空记忆
+    L("……好。重新认识一下。", "memory_cleared"),
+    L("都忘了？那也没关系。", "memory_cleared"),
+    L("嗯。从今天开始。", "memory_cleared"),
+]
+
+
+FOLLOWUPS = [
+    "……谢谢你陪我。",
+    "说出来好像也没什么。",
+    "……我是不是说多了。",
+    "算了，你忙吧。",
+    "我只是随便说说。",
+    "……别放在心上。",
+    "嗯，就这样。",
+    "我自己待会儿也行。",
+]
+
+COMPLIMENTS = [
+    "……谢谢。别盯着看。",
+    "我知道。",
+    "嗯。你也是。",
+]
+
+
+def lines_for(event: str) -> list[Line]:
+    return [line for line in LINES if line.event == event]
