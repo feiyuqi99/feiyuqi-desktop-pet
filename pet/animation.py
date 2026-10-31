@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 
 SPRITE_DIR = Path(__file__).resolve().parent.parent / "assets" / "sprites"
@@ -74,8 +75,15 @@ class SpriteLibrary:
         pixmap = QPixmap(str(path))
         if pixmap.isNull():
             logging.error("sprite failed to load: %s", path)
-            pixmap = QPixmap(SPRITE_SIZE, SPRITE_SIZE)
+            pixmap = QPixmap(int(round(DRAW_SIZE)), int(round(DRAW_SIZE)))
             pixmap.fill(0)
+        else:
+            pixmap = pixmap.scaled(
+                int(round(DRAW_SIZE)),
+                int(round(DRAW_SIZE)),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
         self._cache[key] = pixmap
         return pixmap
 
@@ -84,7 +92,10 @@ class SpriteLibrary:
         cached = self._images.get(key)
         if cached is not None:
             return cached
-        image = self.get(outfit, frame).toImage()
+        image = QImage(str(self.path_for(outfit, frame)))
+        if image.isNull():
+            image = QImage(SPRITE_SIZE, SPRITE_SIZE, QImage.Format_RGBA8888)
+            image.fill(0)
         self._images[key] = image
         return image
 

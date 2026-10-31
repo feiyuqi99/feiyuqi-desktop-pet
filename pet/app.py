@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
 import time
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
@@ -15,10 +17,16 @@ from .animation import FEET_Y, SpriteLibrary
 from .behavior import Behavior, BehaviorContext
 from .bubble import BubbleManager
 from .companion import Alert, Companion
-from .config import LOG_PATH, load_config, save_config
+from .config import (
+    CONFIG_PATH,
+    LOG_PATH,
+    MEMORY_PATH,
+    atomic_write_json,
+    load_config,
+)
 from .dialogue import DialogueContext, DialogueEngine, Speech
 from .lines import LINES
-from .memory import Memory, load_memory, save_memory
+from .memory import Memory, load_memory
 from .mood import change, decay, label as mood_label
 from .perception import Perception, PerceptionState, time_band
 from .persona import pet_name
@@ -105,6 +113,7 @@ class PetApp(QObject):
         self._grounded = False
         self._fall_target = 0.0
         self._support_check_at = 0.0
+        self._save_lock = threading.Lock()
 
         self.sprites = SpriteLibrary()
         self.sprites.preload()
@@ -293,6 +302,10 @@ class PetApp(QObject):
             if now - self._last_save >= 60:
                 self._last_save = now
                 self._save_state()
+
+            interval = 16 if self._flying else 33
+            if self._tick_timer.interval() != interval:
+                self._tick_timer.setInterval(interval)
         except Exception:
             logging.exception("tick failed")
             if not self._error_shown:
@@ -545,47 +558,58 @@ class PetApp(QObject):
 
     def _step_flight(self, dt: float, now: float, geometry) -> None:
         dt = min(dt, 0.05)
+        x = float(self.window.x())
+        y = float(self.window.y())
+
         if self._vx:
-            x = self.window.x() + self._vx * dt
-            left = geometry.left()
-            right = geometry.right() - self.window.width()
+            x += self._vx * dt
+            left = float(geometry.left())
+            right = float(geometry.right() - self.window.width())
             if x < left:
                 x = left
                 self._vx = -self._vx * 0.45
             elif x > right:
                 x = right
                 self._vx = -self._vx * 0.45
-            self.window.move(int(round(x)), self.window.y())
             decay = 5.0 if self._grounded else 0.5
             self._vx *= max(0.0, 1.0 - decay * dt)
             if abs(self._vx) < 12.0:
                 self._vx = 0.0
 
         if self._grounded:
+            lost = False
             if now >= self._support_check_at:
                 self._support_check_at = now + 0.12
-                feet = self.window.y() + FEET_Y
-                center = self.window.x() + self.window.width() // 2
+                feet = y + FEET_Y
+                center = int(round(x)) + self.window.width() // 2
                 if support.support_at(center, feet, self._exclude_hwnds()) is None:
+                    lost = True
                     self._grounded = False
                     floor_feet = self._feet_floor(geometry)
-                    surface = self._surface_below(feet, floor_feet)
+                    surface = support.surface_below(
+                        center, feet + 1, floor_feet, self._exclude_hwnds()
+                    )
                     self._fall_target = floor_feet if surface is None else float(surface)
                     self.behavior.start_fall(now)
-                    return
-            if not self._vx:
+            if not lost and not self._vx:
                 self._flying = False
+                return
+            self.window.move(int(round(x)), int(round(y)))
             return
 
         previous = self._vy
         self._vy = min(1800.0, self._vy + 2400.0 * dt)
         if previous < 0.0 <= self._vy:
-            surface = self._surface_below(
-                self.window.y() + FEET_Y, self._feet_floor(geometry)
+            center = int(round(x)) + self.window.width() // 2
+            surface = support.surface_below(
+                center,
+                y + FEET_Y + 1,
+                self._feet_floor(geometry),
+                self._exclude_hwnds(),
             )
             if surface is not None:
                 self._fall_target = float(surface)
-        y = self.window.y() + self._vy * dt
+        y += self._vy * dt
         if y < geometry.top():
             y = geometry.top()
             self._vy = -self._vy * 0.35
@@ -602,7 +626,7 @@ class PetApp(QObject):
                 self._support_check_at = now + 0.12
                 if not self._vx:
                     self._flying = False
-        self.window.move(self.window.x(), int(round(y)))
+        self.window.move(int(round(x)), int(round(y)))
 
     def _check_support(self, now: float, geometry) -> None:
         if not self.window.isVisible() or self._flying or self.behavior.mode == "drag":
@@ -652,16 +676,39 @@ class PetApp(QObject):
         self.tray.setToolTip(text)
 
     def _save_state(self) -> None:
+        self._sync_position()
+        self._save_snapshots(asdict(self.config), asdict(self.memory))
+
+    def _save_state_sync(self) -> None:
+        self._sync_position()
+        with self._save_lock:
+            atomic_write_json(CONFIG_PATH, asdict(self.config))
+            atomic_write_json(MEMORY_PATH, asdict(self.memory))
+
+    def _sync_position(self) -> None:
         self.config.x = self.window.x()
         self.config.y = self.window.y()
         self.config.pomodoro.phase = self.companion.phase
         self.config.pomodoro.ends_at = self.companion.ends_at
-        save_config(self.config)
-        save_memory(self.memory)
+
+    def _save_snapshots(self, config: dict, memory: dict) -> None:
+        if not self._save_lock.acquire(blocking=False):
+            return
+
+        def work() -> None:
+            try:
+                atomic_write_json(CONFIG_PATH, config)
+                atomic_write_json(MEMORY_PATH, memory)
+            except Exception:
+                logging.exception("async save failed")
+            finally:
+                self._save_lock.release()
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _on_quit(self) -> None:
         try:
-            self._save_state()
+            self._save_state_sync()
         except Exception:
             logging.exception("save failed on quit")
         logging.info("pet quit")
@@ -921,7 +968,7 @@ class PetApp(QObject):
             return
         self.memory.pet_name = name
         self.window.setWindowTitle(name)
-        save_memory(self.memory)
+        self._save_state()
         self._speak("rename", self._context(time.time()), force=True)
         self._update_tooltip()
 
@@ -952,7 +999,7 @@ class PetApp(QObject):
         QTimer.singleShot(3000, self._finish_exit)
 
     def _finish_exit(self) -> None:
-        self._save_state()
+        self._save_state_sync()
         self.bubble.hide()
         self.window.hide()
         self.tray.hide()

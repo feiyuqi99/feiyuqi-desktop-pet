@@ -119,6 +119,8 @@ def surface_below(
 ) -> int | None:
     windows: list[tuple[int, int, int, int]] = []
     for hwnd, raw in _windows(exclude):
+        if not (raw[0] <= x < raw[2]):
+            continue
         if _cloaked(hwnd):
             continue
         visual = _visual_rect(hwnd)

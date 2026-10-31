@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QWidget
 
 from .animation import (
     DISPLAY_SCALE,
+    DRAW_SIZE,
     FEET_X,
     FEET_Y,
     SPRITE_FEET_X,
@@ -261,9 +262,13 @@ class PetWindow(QWidget):
             state.facing * state.scale * state.squash_x,
             state.scale * state.squash_y,
         )
+        painter.drawPixmap(
+            QRectF(-DRAW_SIZE / 2, -FEET_Y, DRAW_SIZE, DRAW_SIZE),
+            pixmap,
+            QRectF(0, 0, pixmap.width(), pixmap.height()),
+        )
         painter.scale(DISPLAY_SCALE, DISPLAY_SCALE)
         painter.translate(-SPRITE_FEET_X, -SPRITE_FEET_Y)
-        painter.drawPixmap(0, 0, pixmap)
         self._draw_expression(painter, state)
         painter.restore()
 
