@@ -57,3 +57,24 @@ def test_composite_later_layer_wins_and_diff_metrics():
     mean, coverage = diff_metrics(out, red)
     assert mean > 0
     assert coverage == 0
+
+
+def test_casual_rig_assets_exist_and_check_passes():
+    from pathlib import Path
+
+    from tools.build_rig import check
+
+    root = Path(__file__).resolve().parent.parent / "assets" / "rig" / "casual"
+    for name in (
+        "legs.png",
+        "body.png",
+        "left_arm.png",
+        "side_hair.png",
+        "head_idle.png",
+        "head_blink.png",
+        "head_happy.png",
+        "arm_up.png",
+        "rig.json",
+    ):
+        assert (root / name).is_file(), name
+    assert check() == 0

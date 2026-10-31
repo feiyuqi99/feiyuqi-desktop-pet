@@ -1,0 +1,71 @@
+{
+  "outfit": "casual",
+  "canvas": 512,
+  "feet": [
+    256,
+    500
+  ],
+  "draw_order": [
+    "legs",
+    "body",
+    "left_arm",
+    "side_hair",
+    "head",
+    "arm_up"
+  ],
+  "layers": {
+    "legs": {
+      "file": "legs.png",
+      "depth": 0.55,
+      "anchor": [
+        256,
+        415
+      ]
+    },
+    "body": {
+      "file": "body.png",
+      "depth": 0.8,
+      "anchor": [
+        256,
+        430
+      ]
+    },
+    "left_arm": {
+      "file": "left_arm.png",
+      "depth": 0.9,
+      "anchor": [
+        185,
+        275
+      ]
+    },
+    "side_hair": {
+      "file": "side_hair.png",
+      "depth": 1.15,
+      "anchor": [
+        256,
+        300
+      ]
+    },
+    "head": {
+      "file": "head_idle.png",
+      "depth": 1.0,
+      "anchor": [
+        256,
+        250
+      ],
+      "frames": {
+        "idle": "head_idle.png",
+        "blink": "head_blink.png",
+        "happy": "head_happy.png"
+      }
+    },
+    "arm_up": {
+      "file": "arm_up.png",
+      "depth": 1.1,
+      "anchor": [
+        185,
+        275
+      ]
+    }
+  }
+}
