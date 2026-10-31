@@ -1,7 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from pathlib import Path
+
+from PIL import Image, ImageDraw
+from PySide6.QtGui import QImage, QPainter
+from PySide6.QtWidgets import QApplication
+
+from pet.animation import FEET_X, FEET_Y
 
 from pet.behavior import PetState
 from pet.rig import RigLibrary, RigMotion, Spring
@@ -141,3 +151,50 @@ def test_music_and_walk_stay_bounded():
     assert abs(motion.hair_angle.value) <= 1.2
     assert abs(motion.hair_dx.value) <= 2.0
     assert abs(motion.body_angle.value) <= 0.8
+
+
+_APP = QApplication.instance() or QApplication([])
+
+
+def write_png_rig(root: Path) -> RigLibrary:
+    write_rig(root)
+    folder = root / "casual"
+    colors = {
+        "legs.png": (60, 80, 120, 255),
+        "body.png": (250, 233, 203, 255),
+        "left_arm.png": (240, 210, 180, 255),
+        "side_hair.png": (230, 120, 60, 255),
+        "head_idle.png": (250, 200, 170, 255),
+        "head_blink.png": (240, 190, 160, 255),
+        "head_happy.png": (255, 190, 170, 255),
+        "arm_up.png": (250, 220, 190, 255),
+    }
+    for name, color in colors.items():
+        image = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((180, 200, 330, 460), fill=color)
+        image.save(folder / name)
+    return RigLibrary(root)
+
+
+def test_rig_loads_pixmaps_and_draws(tmp_path):
+    lib = write_png_rig(tmp_path)
+    rig = lib.get("casual")
+    assert rig is not None
+    image = QImage(248, 216, QImage.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    painter.translate(FEET_X, FEET_Y)
+    rig.draw(painter, PetState(mode="idle"), 100.0, 1 / 30, lambda p: None)
+    painter.end()
+    opaque = sum(
+        1
+        for y in range(216)
+        for x in range(248)
+        if image.pixelColor(x, y).alpha() > 0
+    )
+    assert opaque > 1000
+
+
+def test_rig_get_returns_none_when_assets_missing(tmp_path):
+    assert RigLibrary(tmp_path).get("casual") is None

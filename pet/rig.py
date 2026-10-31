@@ -6,9 +6,14 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QPainter, QPixmap
+
+from .animation import DISPLAY_SCALE, DRAW_SIZE, FEET_Y, SPRITE_FEET_X, SPRITE_FEET_Y
 from .behavior import PetState
 
 RIG_DIR = Path(__file__).resolve().parent.parent / "assets" / "rig"
+SLOT = QRectF(-DRAW_SIZE / 2, -FEET_Y, DRAW_SIZE, DRAW_SIZE)
 
 
 @dataclass(frozen=True)
@@ -84,6 +89,19 @@ class RigLibrary:
         ) as exc:
             logging.warning("rig unavailable for %s: %s", outfit, exc)
             return None
+
+    def get(self, outfit: str):
+        if outfit in self._rigs:
+            return self._rigs[outfit]
+        spec = self.spec(outfit)
+        rig = None
+        if spec is not None:
+            try:
+                rig = Rig(spec, self.root)
+            except (OSError, ValueError) as exc:
+                logging.warning("rig failed for %s: %s", outfit, exc)
+        self._rigs[outfit] = rig
+        return rig
 
 
 @dataclass
@@ -169,3 +187,108 @@ class RigMotion:
         self.arm.step(dt, arm_target, stiffness=90.0, damping=13.0, limit=1.2)
         scale_target = 0.96 if expression == "heart" else 1.0
         self.head_scale += (scale_target - self.head_scale) * min(1.0, dt * 12.0)
+
+
+class Rig:
+    def __init__(self, spec: RigSpec, root: Path) -> None:
+        self.spec = spec
+        self.motion = RigMotion()
+        self._pixmaps: dict[str, QPixmap] = {}
+        folder = Path(root) / spec.outfit
+        for layer in spec.layers.values():
+            for rel in (layer.file, *layer.frames.values()):
+                if rel in self._pixmaps:
+                    continue
+                pixmap = QPixmap(str(folder / rel))
+                if pixmap.isNull():
+                    raise FileNotFoundError(rel)
+                self._pixmaps[rel] = pixmap.scaled(
+                    int(round(DRAW_SIZE)),
+                    int(round(DRAW_SIZE)),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+
+    def _anchor(self, layer: RigLayer) -> tuple[float, float]:
+        return (
+            -DRAW_SIZE / 2 + layer.anchor[0] * DISPLAY_SCALE,
+            -FEET_Y + layer.anchor[1] * DISPLAY_SCALE,
+        )
+
+    def _pixmap(self, layer: RigLayer, frame: str) -> QPixmap:
+        return self._pixmaps[layer.frames.get(frame, layer.file)]
+
+    def draw(
+        self,
+        painter: QPainter,
+        state: PetState,
+        now: float,
+        dt: float,
+        overlay,
+    ) -> None:
+        self.motion.update(dt, state, now)
+        frame = state.frame if state.frame in ("blink", "happy") else "idle"
+        arm = max(0.0, min(1.0, self.motion.arm.value))
+        for role in self.spec.draw_order:
+            layer = self.spec.layers[role]
+            if role == "left_arm" and arm > 0.99:
+                continue
+            if role == "arm_up" and arm < 0.01:
+                continue
+            opacity = 1.0
+            if role == "left_arm":
+                opacity = 1.0 - arm
+            elif role == "arm_up":
+                opacity = arm
+            self._draw_layer(painter, layer, frame, state, opacity)
+        painter.save()
+        painter.scale(DISPLAY_SCALE, DISPLAY_SCALE)
+        painter.translate(-SPRITE_FEET_X, -SPRITE_FEET_Y)
+        painter.setOpacity(1.0)
+        overlay(painter)
+        painter.restore()
+
+    def _draw_layer(
+        self,
+        painter: QPainter,
+        layer: RigLayer,
+        frame: str,
+        state: PetState,
+        opacity: float,
+    ) -> None:
+        if opacity <= 0.01:
+            return
+        pixmap = self._pixmap(layer, frame)
+        ax, ay = self._anchor(layer)
+        dx = (layer.depth - 0.8) * state.tilt * 0.35
+        dy = 0.0
+        angle = 0.0
+        scale_x = 1.0
+        scale_y = 1.0
+        if layer.role == "head":
+            dx += self.motion.head_dx.value
+            dy += self.motion.head_dy.value
+            scale_y *= self.motion.head_scale
+        elif layer.role == "side_hair":
+            dx += self.motion.hair_dx.value
+            dy += self.motion.head_dy.value * 0.3
+            angle += self.motion.hair_angle.value
+        elif layer.role == "body":
+            dy += self.motion.head_dy.value * 0.15
+            angle += self.motion.body_angle.value
+            scale_y *= 1.0 + 0.006 * self.motion.breath
+        elif layer.role == "legs":
+            angle += self.motion.leg.value
+        elif layer.role == "left_arm":
+            angle += self.motion.body_angle.value * 0.5
+        elif layer.role == "arm_up":
+            dy -= 1.2 * opacity
+            angle -= 3.0 * (1.0 - opacity)
+        painter.save()
+        painter.setOpacity(opacity)
+        painter.translate(ax + dx, ay + dy)
+        painter.rotate(angle)
+        painter.scale(scale_x, scale_y)
+        painter.translate(-ax, -ay)
+        painter.drawPixmap(SLOT, pixmap, pixmap.rect())
+        painter.restore()
