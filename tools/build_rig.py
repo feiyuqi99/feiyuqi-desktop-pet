@@ -150,8 +150,8 @@ JK = OutfitConfig(
     fill_color=None,
     legs_poly=((200, 434), (314, 434), (314, 505), (200, 505)),
     arm_geometry_poly=(
-        (112, 145), (198, 145), (210, 230), (224, 262), (236, 300),
-        (232, 312), (150, 312), (142, 258), (104, 202),
+        (112, 145), (198, 145), (210, 230), (222, 262), (230, 296),
+        (226, 308), (150, 308), (142, 258), (104, 202),
     ),
 )
 
@@ -168,11 +168,11 @@ _NEW_COMMON = dict(
     fill_color=None,
 )
 ARM_GEOMETRY = (
-    (100, 142), (192, 142), (204, 205), (214, 242), (226, 272),
-    (242, 332), (148, 332), (138, 262), (92, 205),
+    (100, 142), (175, 142), (188, 212), (212, 248), (228, 285),
+    (236, 332), (162, 332), (138, 255), (92, 205),
 )
 LONG_SLEEVE_POLY = (
-    (138, 212), (250, 212), (250, 332), (138, 332),
+    (138, 212), (242, 212), (242, 332), (138, 332),
 )
 
 
@@ -187,6 +187,7 @@ def _new(
     arm_sleeve_poly: tuple[tuple[int, int], ...] = (),
     legs_left: int = 195,
     legs_right: int = 325,
+    arm_geometry_poly: tuple[tuple[int, int], ...] = ARM_GEOMETRY,
 ) -> OutfitConfig:
     return OutfitConfig(
         outfit=outfit,
@@ -195,17 +196,24 @@ def _new(
         legs_poly=_legs(leg_top, legs_left, legs_right),
         arm_rule=arm_rule,
         arm_sleeve_poly=arm_sleeve_poly,
-        arm_geometry_poly=ARM_GEOMETRY if arm_rule == "auto" else (),
+        arm_geometry_poly=arm_geometry_poly,
         **_NEW_COMMON,
     )
 
 
 EXTRA = [
     _new("pajama", 385),
-    _new("sport", 395, arm_rule="skin", arm_sleeve_poly=LONG_SLEEVE_POLY),
+    _new(
+        "sport", 395,
+        arm_rule="full",
+        arm_geometry_poly=(
+            (100, 142), (175, 142), (190, 215), (218, 255), (230, 295),
+            (234, 332), (162, 332), (138, 255), (92, 205),
+        ),
+    ),
     _new("sweater", 443),
     _new("yukata", 475),
-    _new("qipao", 470, arm_rule="skin", arm_sleeve_poly=((185, 245), (242, 245), (242, 315), (185, 315))),
+    _new("qipao", 470, arm_rule="full"),
     _new("santa", 442),
     _new("raincoat", 458),
     _new("trench", 445),
@@ -337,6 +345,38 @@ def fill_holes(mask: np.ndarray) -> np.ndarray:
     return mask | (~mask & ~exterior)
 
 
+def components(mask: np.ndarray) -> list[tuple[tuple[int, int], ...]]:
+    height, width = mask.shape
+    seen = np.zeros_like(mask, dtype=bool)
+    found: list[tuple[tuple[int, int], ...]] = []
+    for y0, x0 in zip(*np.nonzero(mask)):
+        if seen[y0, x0]:
+            continue
+        stack = [(int(y0), int(x0))]
+        seen[y0, x0] = True
+        component: list[tuple[int, int]] = []
+        while stack:
+            y, x = stack.pop()
+            component.append((y, x))
+            for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                ny, nx = y + dy, x + dx
+                if 0 <= ny < height and 0 <= nx < width and mask[ny, nx] and not seen[ny, nx]:
+                    seen[ny, nx] = True
+                    stack.append((ny, nx))
+        found.append(tuple(component))
+    return found
+
+
+def fill_small_holes(mask: np.ndarray, max_area: int = 900) -> np.ndarray:
+    holes = fill_holes(mask) & ~mask
+    out = mask.copy()
+    for part in components(holes):
+        if len(part) <= max_area:
+            ys, xs = zip(*part)
+            out[list(ys), list(xs)] = True
+    return out
+
+
 def largest_component(mask: np.ndarray) -> np.ndarray:
     seen = np.zeros_like(mask, dtype=bool)
     best: list[tuple[int, int]] = []
@@ -404,12 +444,20 @@ def arm_up_mask(
     region: np.ndarray,
 ) -> np.ndarray:
     alpha = happy[..., 3] > 8
+    data = happy.astype(np.int16)
+    r, g, b = data[..., 0], data[..., 1], data[..., 2]
     if config.arm_rule == "auto":
         geometry = polygon_mask((CANVAS, CANVAS), config.arm_geometry_poly)
-        core = alpha & ~happy_masks["hair"] & ~happy_masks["dark"] & geometry & region
-        mask = core | (happy_masks["dark"] & dilate(core, 2) & geometry & region)
-        mask = largest_component(fill_holes(mask))
-        return mask & alpha
+        hair = happy_masks["hair"] & (r > 175) & (g > 70) & (g < 195) & (r - g > 60)
+        core = alpha & ~hair & ~happy_masks["dark"] & geometry & region
+        core = core | (happy_masks["dark"] & dilate(core, 2) & geometry & region)
+        core = largest_component(fill_small_holes(core))
+        return core & alpha
+    if config.arm_rule == "full":
+        geometry = polygon_mask((CANVAS, CANVAS), config.arm_geometry_poly)
+        hair = happy_masks["hair"] & (r > 175) & (g > 70) & (g < 195) & (r - g > 60)
+        mask = alpha & ~hair & geometry & region
+        return largest_component(fill_small_holes(mask)) & alpha
     if config.arm_rule == "cream":
         if config.arm_geometry_poly:
             geometry = polygon_mask((CANVAS, CANVAS), config.arm_geometry_poly)
@@ -434,11 +482,18 @@ def arm_up_mask(
         & (r - b < 110)
         & (r - g < 90)
     )
+    geometry = None
+    if config.arm_geometry_poly:
+        geometry = polygon_mask((CANVAS, CANVAS), config.arm_geometry_poly)
+        skin = skin & (r - g > 12) & geometry
     mask = skin & region
-    mask |= happy_masks["dark"] & dilate(mask, 2) & region
     if config.arm_sleeve_poly:
         sleeve = polygon_mask((CANVAS, CANVAS), config.arm_sleeve_poly)
         mask |= happy_masks["dark"] & sleeve
+    mask |= happy_masks["dark"] & dilate(mask, 4 if geometry is not None else 2) & region
+    if geometry is not None:
+        mask &= geometry
+        return fill_small_holes(mask) & alpha
     mask = fill_holes(mask)
     mask = largest_component(mask)
     return mask & alpha
@@ -480,7 +535,9 @@ def build(config: OutfitConfig) -> None:
     else:
         legs_mask = idle_masks["dark"] & (Y >= config.leg_top)
     left_arm_mask = arm_down_poly & alpha & ~idle_masks["hair"] & ~head_mask
-    arm_region = arm_up_poly & happy_alpha & ~happy_masks["hair"]
+    arm_region = arm_up_poly & happy_alpha
+    if config.arm_rule != "auto":
+        arm_region = arm_region & ~happy_masks["hair"]
     raised_arm = arm_up_mask(config, happy, happy_masks, arm_region)
 
     side_cover = dilate(side_mask)

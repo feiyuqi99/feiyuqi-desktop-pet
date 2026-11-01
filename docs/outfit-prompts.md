@@ -2,12 +2,27 @@
 
 每套两张：`<id>_idle.png` 和 `<id>_happy.png`，1024×1024，纯绿幕。
 
-- 参考图 1（idle）：`assets/raw/casual_idle.png`
-- 参考图 2（happy）：`assets/raw/casual_happy.png`
-- 建议图生图，重绘强度 0.55–0.75；两帧用同一 seed、同一会话。
-- 表情句固定两种：
-  - idle：`calm neutral expression, lips gently closed, eyes open, identical to Image 1`
-  - happy：`happy open-mouth smile with softly closed crescent eyes, identical to Image 2`
+## 生成约定（实测有效）
+
+- **idle 帧**：图生图。Image 1 = `assets/raw/casual_idle.png`（姿势取景参考），Image 2 = `assets/raw/casual_happy.png`。提示词用下方各套 idle 段落。
+- **happy 帧**：图生图。Image 1 = **本套已清洗的 idle 成品图**（`tools/clean_raw.py` 处理过），Image 2 = `assets/raw/casual_happy.png`（姿势表情参考）。
+- happy 帧姿势硬性要求：**画面左侧**（角色右手）举起在头侧挥手，画面右侧手臂自然下垂，与 casual_happy 同姿势。必须显式写 `Do not mirror the pose`，否则模型经常举反边。表情为张嘴笑（与 casual_happy 一致，非闭眼）。
+- happy 提示词模板（`[OUTFIT]` 换成本套服装描述）：
+
+```text
+Use case: consistent-character outfit replacement for a game sprite
+Input images: Image 1 = current character in her [OUTFIT] (keep this exact outfit and character); Image 2 = happy pose and expression reference
+Primary request: Redraw the exact same character from Image 1 in a happy greeting pose, keeping her exact [OUTFIT] unchanged: [DESC].
+Character (must stay identical to Image 1): petite chibi anime girl, very long wavy orange hair with side bangs, large warm amber eyes, fair skin, small sunflower hair ornament with black-and-white ribbon on the viewer's right side, same face shape, same hairstyle, same body proportions.
+Pose: the raised waving arm must be on the SAME side as in Image 2 - on the viewer's LEFT side of the image (the character's right hand) raised in a gentle open-hand wave beside her head; the character's left arm on the viewer's RIGHT side stays relaxed at her side; feet together, same scale and framing as Image 2. Do not mirror the pose.
+Expression: happy open-mouth smile, identical to Image 2
+Background: perfectly flat pure chroma-key green #00FF00. No shadow, no gradient, no floor, no background objects, no text.
+Style: clean cel-shaded anime game sprite, soft shading, crisp clean edges with no green fringe.
+Constraints: change ONLY the pose and expression. Keep the face, eyes, hair, sunflower hair ornament, skin tone and all clothing exactly as in Image 1. Do not add bags, umbrellas, weapons or held objects. No watermark, no text, no extra characters.
+```
+
+- 生成后 `tools/clean_raw.py --gen "<id>_<frame>=<生成文件>"` 归档到 `assets/raw/`；再 `build_sprites.py <id>`、`port_blink.py <id>`、`build_rig.py <id>`。
+- 并行生成时输出文件名可能撞时间戳互相覆盖（实测发生过一次），生成后立即归档再继续下一批。
 
 ## 通用负面提示词
 
@@ -318,8 +333,8 @@ Constraints: change ONLY the clothing and the small witch hat. Keep the face, ey
 ## 参数与排错
 
 - 尺寸 1024×1024；图生图重绘强度 0.55–0.75。
-- 两帧同 seed、同一会话；先出 idle，再以 idle 为底出 happy，脸更稳。
-- 工具只支持一张参考图：两帧都用参考图 1，happy 只换表情句。
+- 工具支持多参考图（image1/image2/image3）：idle 用便服双帧参考，happy 用本套 idle + 便服 happy。
+- happy 手臂举反边：在 Pose 句里显式写 `the raised waving arm must be on the SAME side as in Image 2` 和 `Do not mirror the pose`。
 - 脸/发饰跑偏：降低强度到 0.45–0.55，或提高参考图权重。
 - 衣服没换成功：提高到 0.8 左右，并强调 `change ONLY the clothing`。
 - 出现绿边：把背景改成纯蓝 `#0000FF` 或纯品红 `#FF00FF` 后告诉我，我加对应抠色。

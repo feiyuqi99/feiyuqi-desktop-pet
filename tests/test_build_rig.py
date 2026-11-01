@@ -149,3 +149,28 @@ def test_maid_rig_assets_exist_and_check_passes():
     ):
         assert (root / name).is_file(), name
     assert check("maid") == 0
+
+
+def test_all_outfit_rigs_exist_and_check_passes():
+    from pathlib import Path
+
+    from pet.outfits import ALL_OUTFITS
+    from tools.build_rig import CONFIGS, check
+
+    root = Path(__file__).resolve().parent.parent / "assets" / "rig"
+    names = (
+        "legs.png",
+        "body.png",
+        "left_arm.png",
+        "side_hair.png",
+        "head_idle.png",
+        "head_blink.png",
+        "head_happy.png",
+        "arm_up.png",
+        "rig.json",
+    )
+    for outfit in ALL_OUTFITS:
+        assert outfit.id in CONFIGS, outfit.id
+        for name in names:
+            assert (root / outfit.id / name).is_file(), (outfit.id, name)
+        assert check(outfit.id) == 0, outfit.id
