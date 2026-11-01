@@ -2,36 +2,132 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 BASE = Path(__file__).resolve().parent.parent
-SPRITES = BASE / "assets" / "sprites" / "casual"
-OUT = BASE / "assets" / "rig" / "casual"
+SPRITE_ROOT = BASE / "assets" / "sprites"
+RIG_ROOT = BASE / "assets" / "rig"
 
 CANVAS = 512
-HAIR_TOP = 240
-LEG_TOP = 410
 Y, X = np.mgrid[0:CANVAS, 0:CANVAS]
-HEAD_POLY = [
-    (126, 30), (398, 30), (400, 220), (370, 255), (315, 265),
-    (280, 250), (260, 265), (240, 250), (205, 265), (140, 250), (120, 220),
-]
-BODY_POLY = [
-    (150, 245), (360, 245), (392, 300), (388, 360), (366, 415),
-    (342, 432), (178, 432), (150, 412), (126, 360), (124, 300),
-]
-ARM_DOWN_POLY = [
-    (150, 265), (228, 265), (240, 320), (226, 390),
-    (190, 405), (156, 375), (140, 315),
-]
-ARM_UP_POLY = [(120, 150), (252, 150), (252, 330), (120, 330)]
-FACE_POLY = [(218, 165), (310, 165), (310, 252), (218, 252)]
+LAYER_ORDER = ["legs", "body", "left_arm", "side_hair", "head", "arm_up"]
 
 
-def polygon_mask(size: tuple[int, int], points: list[tuple[int, int]]) -> np.ndarray:
+@dataclass(frozen=True)
+class OutfitConfig:
+    outfit: str
+    hair_top: int
+    leg_top: int
+    legs: str
+    head_poly: tuple[tuple[int, int], ...]
+    body_poly: tuple[tuple[int, int], ...]
+    arm_down_poly: tuple[tuple[int, int], ...]
+    arm_up_poly: tuple[tuple[int, int], ...]
+    face_poly: tuple[tuple[int, int], ...]
+    arm_rule: str
+    fill_color: tuple[int, int, int, int] | None
+    arm_sleeve_poly: tuple[tuple[int, int], ...] = ()
+    legs_poly: tuple[tuple[int, int], ...] = ()
+    anchors: dict[str, tuple[int, int]] = field(
+        default_factory=lambda: {
+            "legs": (256, 415),
+            "body": (256, 430),
+            "left_arm": (185, 275),
+            "side_hair": (256, 300),
+            "head": (256, 250),
+            "arm_up": (185, 275),
+        }
+    )
+    depths: dict[str, float] = field(
+        default_factory=lambda: {
+            "legs": 0.55,
+            "body": 0.8,
+            "left_arm": 0.9,
+            "side_hair": 1.15,
+            "head": 1.0,
+            "arm_up": 1.1,
+        }
+    )
+
+    @property
+    def sprites(self) -> Path:
+        return SPRITE_ROOT / self.outfit
+
+    @property
+    def out(self) -> Path:
+        return RIG_ROOT / self.outfit
+
+
+CASUAL = OutfitConfig(
+    outfit="casual",
+    hair_top=240,
+    leg_top=410,
+    legs="dark",
+    head_poly=(
+        (126, 30), (398, 30), (400, 220), (370, 255), (315, 265),
+        (280, 250), (260, 265), (240, 250), (205, 265), (140, 250), (120, 220),
+    ),
+    body_poly=(
+        (150, 245), (360, 245), (392, 300), (388, 360), (366, 415),
+        (342, 432), (178, 432), (150, 412), (126, 360), (124, 300),
+    ),
+    arm_down_poly=(
+        (150, 265), (228, 265), (240, 320), (226, 390),
+        (190, 405), (156, 375), (140, 315),
+    ),
+    arm_up_poly=((120, 150), (252, 150), (252, 330), (120, 330)),
+    face_poly=((218, 165), (310, 165), (310, 252), (218, 252)),
+    arm_rule="cream",
+    fill_color=(250, 233, 203, 255),
+)
+
+MAID = OutfitConfig(
+    outfit="maid",
+    hair_top=240,
+    leg_top=436,
+    legs="silhouette",
+    head_poly=(
+        (126, 30), (412, 30), (414, 225), (380, 258), (320, 268),
+        (280, 252), (260, 268), (240, 252), (205, 268), (140, 252), (120, 220),
+    ),
+    body_poly=(
+        (150, 245), (360, 245), (392, 300), (388, 360), (366, 415),
+        (342, 432), (178, 432), (150, 412), (126, 360), (124, 300),
+    ),
+    arm_down_poly=(
+        (155, 265), (200, 265), (210, 300), (206, 345),
+        (198, 378), (178, 388), (158, 372), (148, 330), (146, 290),
+    ),
+    arm_up_poly=(
+        (118, 208), (202, 208), (206, 248), (202, 282), (194, 318),
+        (176, 330), (148, 322), (126, 300), (118, 265),
+    ),
+    arm_sleeve_poly=(
+        (160, 285), (205, 280), (215, 310), (212, 345),
+        (192, 352), (170, 340), (160, 315),
+    ),
+    legs_poly=((205, 436), (305, 436), (305, 500), (205, 500)),
+    face_poly=((218, 165), (310, 165), (310, 252), (218, 252)),
+    arm_rule="skin",
+    fill_color=None,
+    anchors={
+        "legs": (256, 420),
+        "body": (256, 430),
+        "left_arm": (185, 290),
+        "side_hair": (256, 300),
+        "head": (256, 250),
+        "arm_up": (200, 300),
+    },
+)
+
+CONFIGS = {config.outfit: config for config in (CASUAL, MAID)}
+
+
+def polygon_mask(size: tuple[int, int], points: tuple[tuple[int, int], ...]) -> np.ndarray:
     image = Image.new("L", size, 0)
     ImageDraw.Draw(image).polygon(points, fill=255)
     return np.asarray(image) > 0
@@ -53,6 +149,34 @@ def fill_region(
 ) -> np.ndarray:
     out = rgba.copy()
     out[mask] = color
+    return out
+
+
+def inpaint_neighbors(
+    rgba: np.ndarray,
+    target: np.ndarray,
+    source: np.ndarray,
+    max_iterations: int = 256,
+) -> np.ndarray:
+    out = rgba.copy()
+    known = source & (rgba[..., 3] > 0)
+    pending = target & ~known
+    for _ in range(max_iterations):
+        if not pending.any():
+            break
+        total = np.zeros(out.shape, dtype=np.float32)
+        count = np.zeros(out.shape[:2], dtype=np.float32)
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            near_known = np.roll(known, (dy, dx), axis=(0, 1))
+            near_rgba = np.roll(out, (dy, dx), axis=(0, 1)).astype(np.float32)
+            total += near_rgba * near_known[..., None]
+            count += near_known
+        grow = pending & (count > 0)
+        if not grow.any():
+            break
+        out[grow] = (total[grow] / count[grow, None]).astype(np.uint8)
+        known |= grow
+        pending &= ~grow
     return out
 
 
@@ -96,8 +220,8 @@ def diff_metrics(actual: np.ndarray, expected: np.ndarray) -> tuple[float, float
     return mean, coverage
 
 
-def load(frame: str) -> np.ndarray:
-    return np.asarray(Image.open(SPRITES / f"{frame}.png").convert("RGBA"))
+def load(config: OutfitConfig, frame: str) -> np.ndarray:
+    return np.asarray(Image.open(config.sprites / f"{frame}.png").convert("RGBA"))
 
 
 def shift_rgba(rgba: np.ndarray, dy: int, dx: int) -> np.ndarray:
@@ -114,6 +238,42 @@ def dilate(mask: np.ndarray, radius: int = 1) -> np.ndarray:
     image = Image.fromarray((mask * 255).astype(np.uint8))
     image = image.filter(ImageFilter.MaxFilter(radius * 2 + 1))
     return np.asarray(image) > 0
+
+
+def fill_holes(mask: np.ndarray) -> np.ndarray:
+    background = (~mask).astype(np.uint8) * 255
+    image = Image.fromarray(background).copy()
+    start = (0, 0) if not mask[0, 0] else (int(mask.shape[1]) - 1, 0)
+    ImageDraw.floodfill(image, start, 128)
+    exterior = np.asarray(image) == 128
+    return mask | (~mask & ~exterior)
+
+
+def largest_component(mask: np.ndarray) -> np.ndarray:
+    seen = np.zeros_like(mask, dtype=bool)
+    best: list[tuple[int, int]] = []
+    height, width = mask.shape
+    for y0, x0 in zip(*np.nonzero(mask)):
+        if seen[y0, x0]:
+            continue
+        stack = [(int(y0), int(x0))]
+        seen[y0, x0] = True
+        component: list[tuple[int, int]] = []
+        while stack:
+            y, x = stack.pop()
+            component.append((y, x))
+            for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                ny, nx = y + dy, x + dx
+                if 0 <= ny < height and 0 <= nx < width and mask[ny, nx] and not seen[ny, nx]:
+                    seen[ny, nx] = True
+                    stack.append((ny, nx))
+        if len(component) > len(best):
+            best = component
+    out = np.zeros_like(mask)
+    if best:
+        ys, xs = zip(*best)
+        out[list(ys), list(xs)] = True
+    return out
 
 
 def aligned_head(
@@ -149,115 +309,153 @@ def happy_head(
     return out
 
 
-def build_casual() -> None:
-    idle = load("idle")
-    blink = load("blink")
-    happy = load("happy")
+def arm_up_mask(
+    config: OutfitConfig,
+    happy: np.ndarray,
+    happy_masks: dict[str, np.ndarray],
+    region: np.ndarray,
+) -> np.ndarray:
+    alpha = happy[..., 3] > 8
+    if config.arm_rule == "cream":
+        geometry = (
+            ((X < 188) & (Y < 235))
+            | ((X < 198) & (Y >= 235) & (Y < 270))
+            | ((X < 208) & (Y >= 270))
+        )
+        base = region & alpha & ~happy_masks["hair"] & geometry & happy_masks["cream"]
+        return dilate(base, 2) & region & geometry
+    data = happy.astype(np.int16)
+    r, g, b = data[..., 0], data[..., 1], data[..., 2]
+    skin = (
+        (alpha)
+        & (r > 190)
+        & (g > 140)
+        & (b > 110)
+        & (r - b < 110)
+        & (r - g < 90)
+    )
+    mask = skin & region
+    mask |= happy_masks["dark"] & dilate(mask, 2) & region
+    if config.arm_sleeve_poly:
+        sleeve = polygon_mask((CANVAS, CANVAS), config.arm_sleeve_poly)
+        mask |= happy_masks["dark"] & sleeve
+    mask = fill_holes(mask)
+    mask = largest_component(mask)
+    return mask & alpha
+
+
+def build(config: OutfitConfig) -> None:
+    idle = load(config, "idle")
+    blink = load(config, "blink")
+    happy = load(config, "happy")
     alpha = idle[..., 3] > 8
-    hair = color_masks(idle)["hair"]
-    dark = color_masks(idle)["dark"]
+    idle_masks = color_masks(idle)
     happy_alpha = happy[..., 3] > 8
     happy_masks = color_masks(happy)
-    happy_hair = happy_masks["hair"]
-    happy_cream = happy_masks["cream"]
-    body_poly = polygon_mask((CANVAS, CANVAS), BODY_POLY)
-    arm_down_poly = polygon_mask((CANVAS, CANVAS), ARM_DOWN_POLY)
-    arm_up_poly = polygon_mask((CANVAS, CANVAS), ARM_UP_POLY)
-    head_poly = polygon_mask((CANVAS, CANVAS), HEAD_POLY)
-    face_poly = polygon_mask((CANVAS, CANVAS), FACE_POLY)
+
+    def mask(points: tuple[tuple[int, int], ...]) -> np.ndarray:
+        return polygon_mask((CANVAS, CANVAS), points)
+
+    body_poly = mask(config.body_poly)
+    arm_down_poly = mask(config.arm_down_poly)
+    arm_up_poly = mask(config.arm_up_poly)
+    head_poly = mask(config.head_poly)
+    face_poly = mask(config.face_poly)
 
     head_mask = head_poly & alpha
-    side_mask = hair & (Y >= HAIR_TOP)
-    legs_mask = dark & (Y >= LEG_TOP)
-    left_arm_mask = arm_down_poly & alpha & ~hair & ~head_mask
-    arm_region = arm_up_poly & happy_alpha & ~happy_hair & (
-        ((X < 188) & (Y < 235))
-        | ((X < 198) & (Y >= 235) & (Y < 270))
-        | ((X < 208) & (Y >= 270))
-    )
-    arm_base = arm_region & happy_cream
-    arm_up_mask = dilate(arm_base, 2) & arm_region
+    side_mask = idle_masks["hair"] & (Y >= config.hair_top)
+    if config.legs == "silhouette":
+        legs_mask = mask(config.legs_poly) & alpha & ~idle_masks["hair"]
+    else:
+        legs_mask = idle_masks["dark"] & (Y >= config.leg_top)
+    left_arm_mask = arm_down_poly & alpha & ~idle_masks["hair"] & ~head_mask
+    arm_region = arm_up_poly & happy_alpha & ~happy_masks["hair"]
+    raised_arm = arm_up_mask(config, happy, happy_masks, arm_region)
 
     side_cover = dilate(side_mask)
     arm_cover = dilate(left_arm_mask)
     body_visible = alpha & ~head_mask & ~side_cover & ~legs_mask & ~arm_cover
-    body_fill = body_poly & alpha & (side_cover | arm_cover)
-    body_cream = (250, 233, 203, 255)
+    body_hidden = body_poly & alpha & (side_cover | arm_cover) & ~body_visible
+
+    body = cut(idle, body_visible)
+    if config.fill_color is not None:
+        body = fill_region(body, body_hidden, config.fill_color)
+    else:
+        body = inpaint_neighbors(body, body_hidden, body_visible & (body[..., 3] > 0))
 
     layers = {
         "legs": cut(idle, legs_mask),
-        "body": fill_region(
-            cut(idle, body_visible),
-            body_fill & ~body_visible,
-            body_cream,
-        ),
+        "body": body,
         "left_arm": cut(idle, left_arm_mask),
         "side_hair": cut(idle, side_mask),
         "head_idle": cut(idle, head_mask),
         "head_blink": aligned_head(blink, head_poly, head_mask),
         "head_happy": happy_head(
-            idle, happy, head_poly, head_mask, arm_up_mask, face_poly
+            idle, happy, head_poly, head_mask, raised_arm, face_poly
         ),
-        "arm_up": cut(happy, arm_up_mask),
+        "arm_up": cut(happy, raised_arm),
     }
 
-    OUT.mkdir(parents=True, exist_ok=True)
+    config.out.mkdir(parents=True, exist_ok=True)
     for name, rgba in layers.items():
-        Image.fromarray(rgba).save(OUT / f"{name}.png")
+        Image.fromarray(rgba).save(config.out / f"{name}.png")
     spec = {
-        "outfit": "casual",
+        "outfit": config.outfit,
         "canvas": CANVAS,
         "feet": [256, 500],
-        "draw_order": ["legs", "body", "left_arm", "side_hair", "head", "arm_up"],
+        "draw_order": LAYER_ORDER,
         "layers": {
-            "legs": {"file": "legs.png", "depth": 0.55, "anchor": [256, 415]},
-            "body": {"file": "body.png", "depth": 0.8, "anchor": [256, 430]},
-            "left_arm": {"file": "left_arm.png", "depth": 0.9, "anchor": [185, 275]},
-            "side_hair": {
-                "file": "side_hair.png",
-                "depth": 1.15,
-                "anchor": [256, 300],
-            },
-            "head": {
-                "file": "head_idle.png",
-                "depth": 1.0,
-                "anchor": [256, 250],
-                "frames": {
-                    "idle": "head_idle.png",
-                    "blink": "head_blink.png",
-                    "happy": "head_happy.png",
-                },
-            },
-            "arm_up": {"file": "arm_up.png", "depth": 1.1, "anchor": [185, 275]},
+            role: {
+                "file": f"{'head_idle' if role == 'head' else role}.png",
+                "depth": config.depths[role],
+                "anchor": list(config.anchors[role]),
+                **(
+                    {
+                        "frames": {
+                            "idle": "head_idle.png",
+                            "blink": "head_blink.png",
+                            "happy": "head_happy.png",
+                        }
+                    }
+                    if role == "head"
+                    else {}
+                ),
+            }
+            for role in LAYER_ORDER
         },
     }
-    (OUT / "rig.json").write_text(
+    (config.out / "rig.json").write_text(
         json.dumps(spec, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
 
-def check() -> int:
-    idle = load("idle")
-    head = np.asarray(Image.open(OUT / "head_idle.png").convert("RGBA"))
+def check(outfit: str = "casual") -> int:
+    config = CONFIGS[outfit]
+    idle = load(config, "idle")
     layers = {
-        "legs": np.asarray(Image.open(OUT / "legs.png").convert("RGBA")),
-        "body": np.asarray(Image.open(OUT / "body.png").convert("RGBA")),
-        "left_arm": np.asarray(Image.open(OUT / "left_arm.png").convert("RGBA")),
-        "side_hair": np.asarray(Image.open(OUT / "side_hair.png").convert("RGBA")),
-        "head": head,
+        "legs": np.asarray(Image.open(config.out / "legs.png").convert("RGBA")),
+        "body": np.asarray(Image.open(config.out / "body.png").convert("RGBA")),
+        "left_arm": np.asarray(Image.open(config.out / "left_arm.png").convert("RGBA")),
+        "side_hair": np.asarray(Image.open(config.out / "side_hair.png").convert("RGBA")),
+        "head": np.asarray(Image.open(config.out / "head_idle.png").convert("RGBA")),
     }
     composed = composite(layers, ["legs", "body", "left_arm", "side_hair", "head"])
     mean, coverage = diff_metrics(composed, idle)
-    print(f"idle composite mean_rgb={mean:.2f} coverage={coverage:.4f}")
+    print(f"{outfit} idle composite mean_rgb={mean:.2f} coverage={coverage:.4f}")
     return 0 if mean <= 3.0 and coverage <= 0.005 else 1
 
 
 def main() -> int:
-    if "--check" in sys.argv:
-        return check()
-    build_casual()
-    return check()
+    names = [arg for arg in sys.argv[1:] if not arg.startswith("--")] or list(CONFIGS)
+    unknown = [name for name in names if name not in CONFIGS]
+    if unknown:
+        print(f"unknown outfit: {', '.join(unknown)}")
+        return 2
+    if "--check" not in sys.argv:
+        for name in names:
+            build(CONFIGS[name])
+    return max(check(name) for name in names)
 
 
 if __name__ == "__main__":

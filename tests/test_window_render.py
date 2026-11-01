@@ -42,6 +42,16 @@ def test_maid_and_casual_both_render():
     assert opaque_count(render(window)) > 1000
 
 
+def test_maid_uses_rig_when_available():
+    sprites = SpriteLibrary()
+    sprites.preload()
+    window = PetWindow(sprites)
+    window.apply_state(PetState())
+    window.set_outfit("maid")
+    assert window._rig is not None
+    assert opaque_count(render(window)) > 1000
+
+
 def test_casual_without_rig_falls_back(tmp_path):
     sprites = SpriteLibrary()
     window = PetWindow(sprites)

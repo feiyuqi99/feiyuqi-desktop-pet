@@ -8,6 +8,8 @@ from tools.build_rig import (
     composite,
     diff_metrics,
     fill_region,
+    fill_holes,
+    inpaint_neighbors,
     polygon_mask,
 )
 
@@ -35,6 +37,33 @@ def test_fill_region_only_touches_mask():
     out = fill_region(rgba, mask, (1, 2, 3, 255))
     assert tuple(out[1, 1]) == (1, 2, 3, 255)
     assert out[0, 0, 3] == 0
+
+
+def test_inpaint_neighbors_grows_surrounding_colors():
+    rgba = np.zeros((6, 12, 4), dtype=np.uint8)
+    rgba[..., 3] = 255
+    rgba[:, :6, :3] = (40, 35, 30)
+    rgba[:, 6:, :3] = (250, 235, 215)
+    hole = np.zeros((6, 12), dtype=bool)
+    hole[2:4, 3] = True
+    hole[2:4, 8] = True
+    source = (rgba[..., 3] > 0) & ~hole
+    out = inpaint_neighbors(rgba, hole, source)
+    assert out[2, 3, 0] < 60
+    assert out[3, 3, 0] < 60
+    assert out[2, 8, 0] > 240
+    assert out[3, 8, 0] > 240
+    assert out[2, 3, 3] == 255
+
+
+def test_fill_holes_keeps_exterior_open():
+    mask = np.zeros((20, 20), dtype=bool)
+    mask[4:16, 4:16] = True
+    mask[8:12, 8:12] = False
+    filled = fill_holes(mask)
+    assert filled[9, 9]
+    assert not filled[0, 0]
+    assert not filled[19, 19]
 
 
 def test_best_shift_recovers_translation():
@@ -77,4 +106,25 @@ def test_casual_rig_assets_exist_and_check_passes():
         "rig.json",
     ):
         assert (root / name).is_file(), name
-    assert check() == 0
+    assert check("casual") == 0
+
+
+def test_maid_rig_assets_exist_and_check_passes():
+    from pathlib import Path
+
+    from tools.build_rig import check
+
+    root = Path(__file__).resolve().parent.parent / "assets" / "rig" / "maid"
+    for name in (
+        "legs.png",
+        "body.png",
+        "left_arm.png",
+        "side_hair.png",
+        "head_idle.png",
+        "head_blink.png",
+        "head_happy.png",
+        "arm_up.png",
+        "rig.json",
+    ):
+        assert (root / name).is_file(), name
+    assert check("maid") == 0

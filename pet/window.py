@@ -63,7 +63,7 @@ class PetWindow(QWidget):
         self._drag_offset = QPoint()
         self._moves: deque[tuple[float, QPoint]] = deque()
         self._rig_library = RigLibrary()
-        self._rig = None
+        self._rig = self._rig_library.get(self.outfit)
         self._last_paint = time.monotonic()
 
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -87,7 +87,7 @@ class PetWindow(QWidget):
 
     def set_outfit(self, outfit: str) -> None:
         self.outfit = outfit
-        self._rig = self._rig_library.get(outfit) if outfit == "casual" else None
+        self._rig = self._rig_library.get(outfit)
         self.update()
 
     def set_always_on_top(self, enabled: bool) -> None:
