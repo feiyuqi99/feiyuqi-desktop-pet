@@ -16,9 +16,12 @@ SPRITES = BASE / "assets" / "sprites"
 
 DIFF_THRESHOLD = 60
 FACE_POLY = ((218, 165), (310, 165), (310, 252), (218, 252))
-EYE_BAND = ((212, 182), (314, 182), (314, 242), (212, 242))
+# 必须完整盖住两只眼睛：参考帧左眼一直延伸到 x≈185，右边缘截断会留下半只睁眼。
+EYE_BAND = ((170, 166), (330, 166), (330, 238), (170, 238))
 ALIGN_PAD = 10
 MIN_PIECE = 250
+SCALES = (0.90, 0.94, 0.98, 1.0, 1.02)
+FACE_CENTER = (264, 208)
 
 
 def dilate(mask: np.ndarray, radius: int = 1) -> np.ndarray:
@@ -52,12 +55,22 @@ def components(mask: np.ndarray) -> list[np.ndarray]:
     return found
 
 
+def scale_rgba(rgba: np.ndarray, scale: float, center: tuple[int, int]) -> np.ndarray:
+    cx, cy = center
+    coeffs = (1 / scale, 0, cx - cx / scale, 0, 1 / scale, cy - cy / scale)
+    image = Image.fromarray(rgba)
+    out = image.transform(
+        (CANVAS, CANVAS), Image.AFFINE, coeffs, resample=Image.BILINEAR
+    )
+    return np.asarray(out)
+
+
 def sad_shift(
     ref: np.ndarray,
     target: np.ndarray,
     window: np.ndarray,
-    max_shift: int = 10,
-) -> tuple[int, int]:
+    max_shift: int = 16,
+) -> tuple[int, int, int]:
     base = window & (ref[..., 3] > 8) & (target[..., 3] > 8)
     best = (0, 0)
     best_score = float("inf")
@@ -69,11 +82,7 @@ def sad_shift(
             if score < best_score:
                 best_score = score
                 best = (dy, dx)
-    return best
-
-
-def face_window() -> np.ndarray:
-    return polygon_mask((CANVAS, CANVAS), FACE_POLY)
+    return best[0], best[1], int(best_score)
 
 
 def eye_mask(ref_idle: np.ndarray, ref_blink: np.ndarray) -> np.ndarray:
@@ -89,20 +98,34 @@ def port_blink(outfit: str, ref: str = "casual") -> Path:
     ref_idle = np.asarray(Image.open(SPRITES / ref / "idle.png").convert("RGBA"))
     ref_blink = np.asarray(Image.open(SPRITES / ref / "blink.png").convert("RGBA"))
     idle = np.asarray(Image.open(SPRITES / outfit / "idle.png").convert("RGBA"))
-    window = face_window()
+    window = polygon_mask((CANVAS, CANVAS), FACE_POLY)
 
     # 第一段：参考 blink 对齐到参考 idle，收紧眼部差异
-    rdy, rdx = sad_shift(ref_idle, ref_blink, window)
-    ref_blink_aligned = shift_rgba(ref_blink, rdy, rdx)
+    rdy, rdx, _ = sad_shift(ref_idle, ref_blink, window)
+    ref_blink = shift_rgba(ref_blink, rdy, rdx)
 
-    # 第二段：参考 idle 对齐到目标 idle
-    tdy, tdx = sad_shift(ref_idle, idle, window)
+    # 第二段：尺度 + 平移对齐参考 idle 到目标 idle
+    best = (1.0, 0, 0, float("inf"))
+    for scale in SCALES:
+        si = scale_rgba(ref_idle, scale, FACE_CENTER)
+        dy, dx, score = sad_shift(si, idle, window)
+        if score < best[3]:
+            best = (scale, dy, dx, score)
+    scale, tdy, tdx, _ = best
+    si = scale_rgba(ref_idle, scale, FACE_CENTER)
+    sb = scale_rgba(ref_blink, scale, FACE_CENTER)
 
     out = idle.copy()
     pieces = 0
-    aligned_blink = shift_rgba(ref_blink_aligned, tdy, tdx)
-    for part in components(eye_mask(ref_idle, ref_blink_aligned)):
-        patch = shift_rgba(dilate(part, 1).astype(np.uint8), tdy, tdx).astype(bool)
+    for part in components(eye_mask(si, sb)):
+        ys, xs = np.where(part)
+        y0, y1 = max(0, ys.min() - ALIGN_PAD), min(CANVAS, ys.max() + ALIGN_PAD + 1)
+        x0, x1 = max(0, xs.min() - ALIGN_PAD), min(CANVAS, xs.max() + ALIGN_PAD + 1)
+        piece_window = np.zeros((CANVAS, CANVAS), dtype=bool)
+        piece_window[y0:y1, x0:x1] = True
+        pdy, pdx, _ = sad_shift(si, idle, piece_window)
+        aligned_blink = shift_rgba(sb, pdy, pdx)
+        patch = shift_rgba(dilate(part, 2).astype(np.uint8), pdy, pdx).astype(bool)
         patch &= idle[..., 3] > 8
         out[patch] = aligned_blink[patch]
         pieces += 1
@@ -110,7 +133,7 @@ def port_blink(outfit: str, ref: str = "casual") -> Path:
     Image.fromarray(out).save(target)
     print(
         f"{outfit}: blink ported from {ref} "
-        f"(ref shift {rdy},{rdx}, target shift {tdy},{tdx}, {pieces} pieces)"
+        f"(ref shift {rdy},{rdx}, scale {scale:.2f}, base {tdy},{tdx}, {pieces} pieces)"
     )
     return target
 

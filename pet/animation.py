@@ -30,6 +30,8 @@ FEET = "feet"
 SPRITE_FEET_X = 256
 SPRITE_FEET_Y = 500
 HAND_SPOTS = ((174, 330, 30), (338, 330, 30))
+# 眨眼帧左眼区域，眨眼帧在这里只会比 idle 多一层闭眼；必须完整盖住每套的左眼。
+WINK_BOX = (174, 158, 68, 82)
 
 
 def part_at(sx: int, sy: int) -> str:
@@ -51,6 +53,7 @@ class SpriteLibrary:
     def __init__(self) -> None:
         self._cache: dict[tuple[str, str], QPixmap] = {}
         self._images: dict[tuple[str, str], QImage] = {}
+        self._winks: dict[str, tuple[QImage, int, int] | None] = {}
         self.missing: list[str] = []
 
     def preload(self) -> None:
@@ -100,6 +103,17 @@ class SpriteLibrary:
             image.fill(0)
         self._images[key] = image
         return image
+
+    def wink_patch(self, outfit: str) -> tuple[QImage, int, int] | None:
+        if outfit in self._winks:
+            return self._winks[outfit]
+        image = self.image(outfit, "blink")
+        x, y, width, height = WINK_BOX
+        patch = None
+        if not image.isNull():
+            patch = (image.copy(x, y, width, height), x, y)
+        self._winks[outfit] = patch
+        return patch
 
     def alpha_at(self, outfit: str, frame: str, sx: int, sy: int) -> int:
         if not (0 <= sx < SPRITE_SIZE and 0 <= sy < SPRITE_SIZE):

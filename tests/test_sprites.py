@@ -55,3 +55,20 @@ def test_icons_exist():
     tray = Image.open(ICONS / "tray.png")
     assert tray.size == (128, 128)
     assert (ICONS / "pet.ico").exists()
+
+
+def test_blink_mask_covers_both_eyes():
+    from tools.port_blink import SPRITES, components, eye_mask
+
+    idle = np.asarray(Image.open(SPRITES / "casual" / "idle.png").convert("RGBA"))
+    blink = np.asarray(Image.open(SPRITES / "casual" / "blink.png").convert("RGBA"))
+    pieces = []
+    for piece in components(eye_mask(idle, blink)):
+        xs = np.where(piece)[1]
+        pieces.append((int(xs.min()), int(xs.max()), int(piece.sum())))
+    assert len(pieces) == 2, pieces
+    left, right = sorted(pieces)
+    # 参考帧左眼一直延伸到 x≈185；掩码左边缘一旦收窄，目标帧会残留半只睁眼。
+    assert left[0] <= 195 and left[1] - left[0] >= 40, left
+    assert right[0] >= 250 and right[1] - right[0] >= 40, right
+    assert left[2] > 900 and right[2] > 900, pieces

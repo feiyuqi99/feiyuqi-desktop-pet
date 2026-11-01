@@ -481,19 +481,11 @@ class PetWindow(QWidget):
                     int(235 * (1.0 - phase * 0.5)),
                 )
         elif expression == "wink":
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(253, 230, 205, 255))
-            painter.drawEllipse(QRectF(201, 191, 30, 23))
-            pen = QPen(QColor(90, 45, 20, 245), 3.4)
-            pen.setCapStyle(Qt.RoundCap)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            path = QPainterPath()
-            path.moveTo(203, 201)
-            path.quadTo(216, 212, 229, 200)
-            painter.drawPath(path)
-            painter.drawLine(QPointF(203, 201), QPointF(198, 197))
-            painter.drawLine(QPointF(229, 200), QPointF(234, 196))
+            if state.frame == "idle":
+                wink = self.sprites.wink_patch(self.outfit)
+                if wink is not None:
+                    patch, x, y = wink
+                    painter.drawImage(QPointF(x, y), patch)
             self._sparkle(painter, 312, 172, 13.0, 220)
         elif expression == "tears":
             self._drop(painter, 232, 232, 11, QColor(120, 200, 255, 230))

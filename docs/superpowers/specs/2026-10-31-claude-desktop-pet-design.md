@@ -14,8 +14,10 @@
 ## 素材管线
 
 - ImageGen 生成 6 张 1024×1024 绿幕立绘：`maid` / `casual` 各 `idle`、`blink`、`happy`。
+- 新装扮每套生成 `idle`、`happy` 两张（图生图，参考便服两帧；happy 帧要求画面左侧手臂举起挥动，与便服 happy 同姿势）；`blink` 由 `tools/port_blink.py` 从基础角色眨眼帧移植眼部区域（分块 SAD 对齐 + 尺度搜索，失败才补生成）。
+- `tools/clean_raw.py`：去掉生成图右下角「AI 生成」水印（保留最大连通域）。
 - `tools/build_sprites.py`：绿键 + 软 alpha + 去溢色 + 1px 腐蚀 + 脚底基线统一到 512×512 画布（脚底 y=500，角色高约 460）。
-- 输出 `assets/sprites/{maid,casual}/*.png`、`assets/icons/tray.png`、`assets/icons/pet.ico`。
+- 输出 `assets/sprites/{12 套}/*.png`、`assets/icons/tray.png`、`assets/icons/pet.ico`。
 - 素材缺失回退 idle；全部缺失弹窗退出。
 
 ## 架构
@@ -125,7 +127,7 @@ UI 文案同样去机械化：菜单是「摸摸头」「一起专注」「回�
 - 按立绘部位命中，透明处不响应：头顶/头发摸头、脸戳、身体戳、袖口击掌、裙摆、脚踝。各部位台词、表情、心情不同。
 - 点脚踝会缩一下；双击轻跳一下；摸头有概率轻跳；击掌有星星。
 - 闲置 20–50 秒随机微动作：看左右、重心偏移、理头发、打哈欠、伸懒腰。
-- 表情矢量叠加 13 种：blush / heart / annoyed / surprised / sparkle / wink / tears / pout / confused / shy / dizzy / sweat / expect（happy 走头部帧）。互动按部位和次数映射（如第二次戳脸鼓脸、戳身体疑惑、拎久冒汗、快速甩出晕），闲置偶发疑惑/期待/鼓脸，冷落太久偶尔泪光。
+- 表情叠加 13 种：blush / heart / annoyed / surprised / sparkle / wink / tears / pout / confused / shy / dizzy / sweat / expect（happy 走头部帧；wink 的闭眼直接贴本套 `blink` 帧左眼区域，避免矢量遮罩盖不住不同立绘的眼睛）。互动按部位和次数映射（如第二次戳脸鼓脸、戳身体疑惑、拎久冒汗、快速甩出晕），闲置偶发疑惑/期待/鼓脸，冷落太久偶尔泪光。
 - 8 个短时动作（2.2–4 秒）：伸懒腰、东张西望、招手、打哈欠、喝水、吃点心、打伞、看书。菜单「做点什么」可手动触发；闲置轮换前四项；喝水/吃饭提醒联动喝水/吃点心，番茄钟联动看书；每个动作配专属台词，`PetState.action` 驱动分层骨架手势。
 - 4 个道具（杯子、饼干、书、伞）用 QPainter 矢量绘制在精灵坐标系的手部锚点，12 套装扮通用；打伞时伞盖举过头顶并落雨滴。
 - 漫步 60px/s、3–8 秒，30% 概率中途停一下，走动时带轻微摇摆。
@@ -142,7 +144,7 @@ UI 文案同样去机械化：菜单是「摸摸头」「一起专注」「回�
 
 ## 2.5D 分层与换装
 
-装扮目标是 12 套（女仆、便服、JK 水手服、居家睡衣、运动服、宽松毛衣、浴衣、旗袍、圣诞装、雨衣、风衣围巾、魔女），当前已有女仆、便服两套分层资产。是否出现在换装菜单由 `pet/outfits.py` 的资产检测决定：`assets/sprites/<id>/idle.png` 存在即可换；有 `assets/rig/<id>/rig.json` 就走分层，否则退回该套整张立绘。
+装扮共 12 套（女仆、便服、JK 水手服、居家睡衣、运动服、宽松毛衣、浴衣、旗袍、圣诞装、雨衣、风衣围巾、魔女），全部具备分层资产。是否出现在换装菜单由 `pet/outfits.py` 的资产检测决定：`assets/sprites/<id>/idle.png` 存在即可换；有 `assets/rig/<id>/rig.json` 就走分层，否则退回该套整张立绘。
 
 - 分层：腿、身体、下垂手臂、侧发、头部（idle/blink/happy 三份）、抬起手臂，共 6 层。侧发暂时合并前后发，少一个接缝。
 - 建库：`tools/build_rig.py` 按服装配置从现有 idle/blink/happy 三张 512 立绘切层；被发丝和手臂挡住的身体区域补色（便服补卫衣奶油色，女仆按邻域生长补黑裙/围裙色）；happy 头部以 idle 为底只换脸部；抬手层便服取奶油色袖子，女仆取肤色手/袖口和黑色袖子。`--check` 按原顺序叠回，平均 RGB 差 ≤3/255、alpha 覆盖率差 ≤0.5%。
