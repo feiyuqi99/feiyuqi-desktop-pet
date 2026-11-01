@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -8,13 +9,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from pathlib import Path
 
 from PIL import Image, ImageDraw
+import numpy as np
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
-from pet.animation import FEET_X, FEET_Y
+from pet.animation import FEET_X, FEET_Y, SpriteLibrary
 
 from pet.behavior import PetState
 from pet.rig import RigLibrary, RigMotion, Spring
+from pet.window import PetWindow
 
 
 def write_rig(root: Path) -> RigLibrary:
@@ -71,6 +74,31 @@ def test_rig_spec_loads_layers_and_head_variants(tmp_path):
 
 def test_rig_spec_missing_returns_none(tmp_path):
     assert RigLibrary(tmp_path).spec("casual") is None
+
+
+def test_rig_spec_reads_optional_hand_anchor(tmp_path):
+    lib = write_rig(tmp_path)
+    assert lib.spec("casual").hand == (150.0, 200.0)
+    path = tmp_path / "casual" / "rig.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["hand"] = [140, 190]
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    lib = RigLibrary(tmp_path)
+    assert lib.spec("casual").hand == (140.0, 190.0)
+
+
+def test_window_uses_rig_hand_anchor(tmp_path):
+    lib = write_png_rig(tmp_path)
+    path = tmp_path / "casual" / "rig.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["hand"] = [140, 190]
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    rig = RigLibrary(tmp_path).get("casual")
+    window = PetWindow(SpriteLibrary())
+    window._rig = rig
+    assert window._hand_anchor() == (140.0, 190.0)
+    window._rig = None
+    assert window._hand_anchor() == (150.0, 200.0)
 
 
 def test_rig_spec_rejects_unknown_draw_role(tmp_path):
@@ -138,11 +166,91 @@ def test_music_sparkle_does_not_raise_arm():
     assert motion.arm.value < 0.1
 
 
+def test_hold_actions_keep_arm_down():
+    for action in ("drink", "eat", "read"):
+        motion = RigMotion()
+        advance(motion, PetState(mode="action", action=action), 1.0)
+        assert motion.arm.value < 0.1, action
+
+
+def test_wave_and_umbrella_raise_arm():
+    for action in ("wave", "stretch", "umbrella"):
+        motion = RigMotion()
+        advance(motion, PetState(mode="action", action=action), 1.0)
+        assert motion.arm.value > 0.7, action
+
+
 def test_dragging_makes_legs_dangle():
     motion = RigMotion()
     advance(motion, PetState(mode="drag", tilt=8.0), 0.6)
     assert motion.leg.value > 2.0
     assert abs(motion.hair_angle.value) <= 1.2
+
+
+def test_beat_moves_torso_and_head_in_opposition():
+    """A groove reads as hips leading and head countering, not a board lean."""
+    body = []
+    head = []
+    for step in range(24):
+        phase = step * math.tau / 24
+        state = PetState(mode="idle", music_phase=phase, music_energy=1.0)
+        motion = RigMotion()
+        advance(motion, state, 1.2)
+        body.append(motion.body_angle.value)
+        head.append(motion.head_dx.value)
+    assert max(abs(v) for v in body) > 0.6
+    assert max(abs(v) for v in head) > 0.4
+    assert any(b * h < 0 for b, h in zip(body, head))
+
+
+def test_legs_stay_vertical_when_the_body_leans(tmp_path):
+    def build(root: Path) -> RigLibrary:
+        lib = write_png_rig(root)
+        folder = root / "casual"
+        shapes = {
+            "legs.png": (200, 400, 312, 470),
+            "body.png": (200, 240, 312, 395),
+            "left_arm.png": (150, 250, 205, 340),
+            "arm_up.png": (150, 250, 205, 340),
+            "side_hair.png": (170, 180, 342, 300),
+            "head_idle.png": (190, 60, 322, 200),
+            "head_blink.png": (190, 60, 322, 200),
+            "head_happy.png": (190, 60, 322, 200),
+        }
+        for name, rect in shapes.items():
+            image = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
+            ImageDraw.Draw(image).rectangle(rect, fill=(200, 120, 90, 255))
+            image.save(folder / name)
+        return lib
+
+    def render(rotation: float, name: str):
+        rig = build(tmp_path / f"r{rotation}").get("casual")
+        image = QImage(248, 216, QImage.Format_ARGB32)
+        image.fill(0)
+        painter = QPainter(image)
+        painter.translate(FEET_X, FEET_Y)
+        painter.rotate(rotation)
+        rig.draw(
+            painter,
+            PetState(mode="idle"),
+            100.0,
+            1 / 30,
+            lambda p: None,
+            base_rotation=rotation,
+        )
+        painter.end()
+        path = tmp_path / name
+        image.save(str(path))
+        return np.asarray(Image.open(path).convert("RGBA"))[:, :, 3]
+
+    upright = render(0.0, "upright.png")
+    leaning = render(6.0, "leaning.png")
+    band = slice(166, 186)
+    diff = np.abs(
+        upright[band].astype(np.int16) - leaning[band].astype(np.int16)
+    )
+    assert upright[band].max() > 200
+    assert diff.max() < 40
 
 
 def test_music_and_walk_stay_bounded():
@@ -154,9 +262,9 @@ def test_music_and_walk_stay_bounded():
         music_energy=1.0,
     )
     advance(motion, state, 3.0)
-    assert abs(motion.hair_angle.value) <= 1.2
-    assert abs(motion.hair_dx.value) <= 2.0
-    assert abs(motion.body_angle.value) <= 0.8
+    assert abs(motion.hair_angle.value) <= 1.6
+    assert abs(motion.hair_dx.value) <= 2.5
+    assert abs(motion.body_angle.value) <= 1.6
 
 
 _APP = QApplication.instance() or QApplication([])

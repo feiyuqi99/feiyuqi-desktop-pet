@@ -93,6 +93,15 @@ REQUIRED_EVENTS = {
     "perception_off",
     "chattiness_normal",
     "care_noon",
+    "action_stretch",
+    "action_look",
+    "action_wave",
+    "action_yawn",
+    "action_drink",
+    "action_eat",
+    "action_umbrella",
+    "action_read",
+    "outfit_change",
 }
 
 

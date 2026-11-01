@@ -17,6 +17,11 @@ ANNOYED = "annoyed"
 NAP = "nap"
 SLEEP = "sleep"
 FALL = "fall"
+ACTION = "action"
+
+SQUASH_ATTACK = 0.08
+MUSIC_LEAN_BASE = 0.35
+MUSIC_LEAN_ENERGY = 0.35
 
 PART_EVENTS = {
     HEAD: "pet",
@@ -72,6 +77,8 @@ class PetState:
     note: bool = False
     music_phase: float = 0.0
     music_energy: float = 0.0
+    action: str = ""
+    prop: str = ""
 
 
 @dataclass
@@ -115,16 +122,34 @@ class Behavior:
         self.pending: list[Action] = []
         self.expression = "neutral"
         self.expression_until = 0.0
+        self.say_times = 0
+        self.next_lonely = 0.0
+        self.action_kind = ""
+        self.action_until = 0.0
+        self.action_expression = ""
+        self.action_durations = {
+            "stretch": 2.2,
+            "look": 2.4,
+            "wave": 2.0,
+            "yawn": 2.4,
+            "drink": 3.2,
+            "eat": 3.0,
+            "umbrella": 4.0,
+            "read": 4.0,
+        }
+        self.action_props = {"drink", "eat", "umbrella", "read"}
         self.hop_started = 0.0
         self.hop_until = 0.0
         self.hop_height = 0.0
         self.squash_until = 0.0
+        self.squash_started_at = 0.0
 
     def _ensure_timers(self, now: float) -> None:
         if self.next_blink <= 0:
             self.next_blink = now + self.rng.uniform(2, 5)
             self.next_wander = now + self.rng.uniform(30, 90)
             self.next_micro = now + self.rng.uniform(20, 50)
+            self.next_lonely = now + self.rng.uniform(900, 1800)
             self.last_input = now
 
     def _queue(self, event: str) -> None:
@@ -151,6 +176,45 @@ class Behavior:
     def _set_expression(self, name: str, until: float) -> None:
         self.expression = name
         self.expression_until = until
+
+    def express(self, name: str, now: float, seconds: float = 1.5) -> None:
+        if self.mode in (SLEEP, NAP):
+            return
+        self._set_expression(name, now + seconds)
+
+    def start_action(self, kind: str, now: float, quiet: bool = False) -> bool:
+        if kind not in self.action_durations:
+            return False
+        if self.mode in (DRAG, FALL):
+            return False
+        if self.mode in (SLEEP, NAP):
+            self.mode = IDLE
+            self.stretch_until = now + 0.35
+        self.mode = ACTION
+        self.mode_until = 0.0
+        self.action_kind = kind
+        self.action_until = now + self.action_durations[kind]
+        self.next_wander = now + self.rng.uniform(30, 90)
+        self.next_micro = now + self.rng.uniform(20, 50)
+        self.last_input = now
+        expressions = {
+            "stretch": "happy",
+            "look": "confused",
+            "wave": "wink",
+            "yawn": "sleepy",
+            "drink": "expect",
+            "eat": "happy",
+            "umbrella": "shy",
+            "read": "expect",
+        }
+        self.action_expression = expressions.get(kind, "neutral")
+        self._set_expression(
+            self.action_expression,
+            now + self.action_durations[kind],
+        )
+        if not quiet:
+            self._queue(f"action_{kind}")
+        return True
 
     def _hop(self, now: float, height: float = 9.0) -> None:
         self.hop_started = now
@@ -193,6 +257,10 @@ class Behavior:
             return
 
         self._set_expression(PART_EXPRESSIONS.get(part, "neutral"), now + 1.2)
+        if len(self.poke_times) == 2:
+            second = {FACE: "pout", HEAD: "shy", BODY: "confused"}.get(part)
+            if second is not None:
+                self._set_expression(second, now + 1.2)
 
         if self.mode in (NAP, SLEEP):
             self._wake(
@@ -223,7 +291,8 @@ class Behavior:
         self.mode = POKE
         self.mode_until = now + 1.2
         self.next_wander = now + self.rng.uniform(30, 90)
-        self._set_expression("happy", now + 1.2)
+        self.say_times += 1
+        self._set_expression("wink" if self.say_times % 4 == 0 else "happy", now + 1.2)
         self._queue("talk")
 
     def on_double_click(self, now: float) -> None:
@@ -268,6 +337,7 @@ class Behavior:
         self.next_micro = now + self.rng.uniform(20, 50)
         if abs(speed) > 1500:
             self.wobble_until = now + 0.7
+            self._set_expression("dizzy", now + 1.6)
             self._queue("drag_fast")
         else:
             self._queue("drag_end")
@@ -282,12 +352,14 @@ class Behavior:
         self._set_expression("surprised", now + 3.0)
 
     def bounce(self, now: float) -> None:
+        self.squash_started_at = now
         self.squash_until = now + 0.2
         self._set_expression("surprised", now + 0.5)
 
     def land(self, now: float) -> None:
         self.mode = IDLE
         self.mode_until = 0.0
+        self.squash_started_at = now
         self.squash_until = now + 0.32
         self.next_wander = now + self.rng.uniform(30, 90)
         self._set_expression("surprised", now + 0.6)
@@ -342,6 +414,12 @@ class Behavior:
         if self.mode in (PET, POKE) and now >= self.mode_until:
             self.mode = IDLE
 
+        if self.mode == ACTION and now >= self.action_until:
+            self.mode = IDLE
+            self.action_kind = ""
+            self.action_expression = ""
+            self.next_wander = now + self.rng.uniform(30, 90)
+
         if self.mode == WANDER:
             if ctx.quiet or ctx.idle_seconds > 600:
                 self.mode = IDLE
@@ -380,6 +458,13 @@ class Behavior:
             self.micro_kind = self.rng.choice(("look_left", "look_right", "shift", "hair", "yawn", "stretch"))
             self.micro_until = now + self.rng.uniform(0.6, 1.1)
             self.next_micro = now + self.rng.uniform(20, 50)
+            if self.rng.random() < 0.3:
+                self._set_expression(
+                    self.rng.choice(("confused", "expect", "pout")), now + 1.0
+                )
+        if now >= self.next_lonely and self.mode == IDLE and ctx.idle_seconds > 600:
+            self._set_expression("tears", now + 2.5)
+            self.next_lonely = now + self.rng.uniform(1200, 2400)
         if now >= self.micro_until:
             self.micro_kind = ""
 
@@ -396,6 +481,17 @@ class Behavior:
             self.blink_until = 0.0
 
         if self.mode in (PET, POKE):
+            frame = "happy"
+        elif self.mode == ACTION and self.action_kind == "yawn":
+            frame = "blink"
+        elif self.mode == ACTION and self.action_kind in (
+            "stretch",
+            "wave",
+            "drink",
+            "eat",
+            "read",
+            "umbrella",
+        ):
             frame = "happy"
         elif self.mode in (SLEEP, NAP) or now < self.blink_until:
             frame = "blink"
@@ -451,7 +547,9 @@ class Behavior:
         elif self.mode == WANDER:
             tilt = 1.5 * facing + math.sin(now * math.tau * 1.5) * 1.4
         if music:
-            tilt += math.sin(self.music_phase) * (1.2 + 1.4 * ctx.music_energy)
+            tilt += math.sin(self.music_phase) * (
+                MUSIC_LEAN_BASE + MUSIC_LEAN_ENERGY * ctx.music_energy
+            )
         if now < self.wobble_until:
             fade = min(1.0, (self.wobble_until - now) / 0.25)
             tilt += math.sin(now * math.tau * 3.0) * 2.5 * fade
@@ -471,7 +569,14 @@ class Behavior:
         elif self.mode == ANNOYED:
             expression = "annoyed"
         elif self.mode == DRAG:
-            expression = "annoyed" if drag_held > 1.8 else "surprised"
+            if drag_held > 1.8:
+                expression = "annoyed"
+            elif drag_held > 0.8:
+                expression = "sweat"
+            else:
+                expression = "surprised"
+        elif self.mode == ACTION:
+            expression = self.action_expression or "neutral"
         elif music and self.mode in (IDLE, WANDER) and now >= self.expression_until:
             if ctx.music_energy >= 0.6:
                 expression = "sparkle"
@@ -497,8 +602,12 @@ class Behavior:
         squash_x = 1.0
         squash_y = 1.0
         if now < self.squash_until:
-            progress = max(0.0, 1.0 - (self.squash_until - now) / 0.32)
-            ease = (1.0 - progress) ** 2
+            elapsed = max(0.0, now - self.squash_started_at)
+            total = max(0.01, self.squash_until - self.squash_started_at)
+            attack = min(1.0, elapsed / SQUASH_ATTACK)
+            recover = max(0.0, total - SQUASH_ATTACK)
+            decay = max(0.0, 1.0 - max(0.0, elapsed - SQUASH_ATTACK) / recover)
+            ease = attack * decay
             squash_y = 1.0 - 0.14 * ease
             squash_x = 1.0 + 0.09 * ease
 
@@ -538,4 +647,10 @@ class Behavior:
             note=music,
             music_phase=self.music_phase if music else 0.0,
             music_energy=ctx.music_energy if music else 0.0,
+            action=self.action_kind if self.mode == ACTION else "",
+            prop=(
+                self.action_kind
+                if self.mode == ACTION and self.action_kind in self.action_props
+                else ""
+            ),
         )

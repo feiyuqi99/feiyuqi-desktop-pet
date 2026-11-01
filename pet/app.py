@@ -31,15 +31,21 @@ from .dialogue import DialogueContext, DialogueEngine, Speech
 from .lines import LINES
 from .memory import Memory, load_memory
 from .mood import change, decay, label as mood_label
+from .outfits import available_ids, available_outfits
 from .perception import Perception, PerceptionState, time_band
 from .persona import pet_name
 from .window import PetWindow
 from .uia import InputScanner
 from . import support
+from . import autostart
 
 ROOT = Path(__file__).resolve().parent.parent
 TRAY_ICON = ROOT / "assets" / "icons" / "tray.png"
 SINGLE_NAME = "ClaudePetInstance"
+# Windows rounds a coarse 33ms timer up to ~47ms, so she renders at ~21fps. That is
+# deliberate: a precise timer at 30fps measured 7.2% of a core against 2.9% here.
+TICK_MS = 33
+FLIGHT_MS = 16
 
 PART_MOOD = {
     "head": 3,
@@ -85,6 +91,8 @@ class PetApp(QObject):
             return
 
         self.config = load_config()
+        if not autostart.sync(self.config.settings.autostart):
+            logging.warning("autostart sync failed")
         self.memory = load_memory()
         self._was_new = self.memory.is_new
         now = time.time()
@@ -175,7 +183,7 @@ class PetApp(QObject):
 
         self._tick_timer = QTimer(self)
         self._tick_timer.timeout.connect(self._tick)
-        self._tick_timer.start(33)
+        self._tick_timer.start(TICK_MS)
 
         QTimer.singleShot(700, self._startup_greeting)
         if self._restored_alert is not None:
@@ -365,7 +373,7 @@ class PetApp(QObject):
                 self._last_save = now
                 self._save_state()
 
-            interval = 16 if self._flying else 33
+            interval = FLIGHT_MS if self._flying else TICK_MS
             if self._tick_timer.interval() != interval:
                 self._tick_timer.setInterval(interval)
         except Exception:
@@ -491,6 +499,12 @@ class PetApp(QObject):
         self.bubble.enqueue(text, 3200)
 
     def _alert_speak(self, alert: Alert | CareAlert, ctx: DialogueContext) -> None:
+        if alert.kind in ("water", "meal", "both"):
+            self.behavior.express("expect", ctx.now, 2.2)
+        if alert.kind in ("water", "both"):
+            self.behavior.start_action("drink", ctx.now, quiet=True)
+        elif alert.kind == "meal":
+            self.behavior.start_action("eat", ctx.now, quiet=True)
         speech = self.dialogue.alert(alert.event, ctx)
         if speech is not None:
             self._handle_speech(speech, 6200, priority=True)
@@ -556,6 +570,16 @@ class PetApp(QObject):
         for action in self.behavior.drain():
             if action.kind == "speak":
                 self._speak(action.event, ctx, force=True, priority=True)
+
+    def _do_action(self, kind: str) -> None:
+        now = time.time()
+        if not self.behavior.start_action(kind, now):
+            return
+        self._on_interacted()
+        ctx = self._context(now)
+        for action in self.behavior.drain():
+            if action.kind == "speak":
+                self._speak(action.event, ctx, force=True)
 
     def _on_double_clicked(self) -> None:
         now = time.time()
@@ -889,17 +913,36 @@ class PetApp(QObject):
         action = menu.addAction("说句话")
         action.triggered.connect(self._say_something)
 
+        action_menu = menu.addMenu("做点什么")
+        self._style_menu(action_menu)
+        for label, kind in (
+            ("伸个懒腰", "stretch"),
+            ("东张西望", "look"),
+            ("招招手", "wave"),
+            ("打个哈欠", "yawn"),
+            ("喝口水", "drink"),
+            ("吃点心", "eat"),
+            ("撑会儿伞", "umbrella"),
+            ("看会儿书", "read"),
+        ):
+            item = action_menu.addAction(label)
+            item.triggered.connect(
+                lambda checked=False, kind=kind: self._do_action(kind)
+            )
+
         outfit_menu = menu.addMenu("换衣服")
         self._style_menu(outfit_menu)
         outfit_group = QActionGroup(outfit_menu)
         outfit_group.setExclusive(True)
-        for label, value in (("女仆装", "maid"), ("便服", "casual")):
-            item = outfit_menu.addAction(label)
+        for outfit in available_outfits():
+            item = outfit_menu.addAction(outfit.label)
             item.setCheckable(True)
-            item.setChecked(self.config.outfit == value)
-            item.setData(f"outfit:{value}")
+            item.setChecked(self.config.outfit == outfit.id)
+            item.setData(f"outfit:{outfit.id}")
             outfit_group.addAction(item)
-            item.triggered.connect(lambda checked=False, value=value: self._set_outfit(value))
+            item.triggered.connect(
+                lambda checked=False, value=outfit.id: self._set_outfit(value)
+            )
 
         pomo_menu = menu.addMenu("一起专注")
         self._style_menu(pomo_menu)
@@ -992,6 +1035,12 @@ class PetApp(QObject):
         action.setData("always_top")
         action.triggered.connect(lambda checked=False: self._set_always_top(checked))
 
+        action = menu.addAction("开机自动启动")
+        action.setCheckable(True)
+        action.setChecked(self.config.settings.autostart)
+        action.setData("autostart")
+        action.triggered.connect(lambda checked=False: self._set_autostart(checked))
+
         chat_menu = menu.addMenu("话多程度")
         self._style_menu(chat_menu)
         chat_group = QActionGroup(chat_menu)
@@ -1039,23 +1088,29 @@ class PetApp(QObject):
         return f"{phase} · {minutes:02d}:{seconds:02d}"
 
     def _set_outfit(self, outfit: str) -> None:
-        if outfit not in ("maid", "casual") or outfit == self.config.outfit:
+        if outfit not in available_ids() or outfit == self.config.outfit:
             return
         self.config.outfit = outfit
         self.window.set_outfit(outfit)
-        event = "outfit_maid" if outfit == "maid" else "outfit_casual"
+        event = {
+            "maid": "outfit_maid",
+            "casual": "outfit_casual",
+        }.get(outfit, "outfit_change")
+        self.behavior.express("wink", time.time(), 1.4)
         self._speak(event, self._context(time.time()), force=True)
         self._save_state()
 
     def _start_focus(self) -> None:
         now = time.time()
         alert = self.companion.start_focus(now)
+        self.behavior.start_action("read", now, quiet=True)
         self._alert_speak(alert, self._context(now))
         self._save_state()
 
     def _start_break(self) -> None:
         now = time.time()
         alert = self.companion.start_break(now)
+        self.behavior.start_action("stretch", now, quiet=True)
         self._alert_speak(alert, self._context(now))
         self._save_state()
 
@@ -1090,6 +1145,16 @@ class PetApp(QObject):
         self.config.settings.always_on_top = checked
         self.window.set_always_on_top(checked)
         self._save_state()
+
+    def _set_autostart(self, checked: bool) -> None:
+        if not autostart.set_enabled(checked):
+            self._direct_bubble("开机启动没设置成功。")
+            return
+        self.config.settings.autostart = checked
+        self._save_state()
+        self._direct_bubble(
+            "好，开机我会自己出来。" if checked else "好，开机不自动出来了。"
+        )
 
     def _set_throwable(self, checked: bool) -> None:
         self.config.settings.throwable = checked

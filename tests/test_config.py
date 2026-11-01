@@ -9,6 +9,7 @@ def test_defaults_when_missing(tmp_path):
     assert config.outfit == "maid"
     assert config.mood == 70
     assert config.settings.chattiness == "normal"
+    assert config.settings.autostart is False
     assert config.settings.care_greet is True
     assert config.settings.care_eyes is True
     assert config.settings.care_water is True
@@ -30,6 +31,7 @@ def test_roundtrip(tmp_path):
             perception=False,
             throwable=False,
             music=False,
+            autostart=True,
             care_greet=False,
             care_eyes=False,
         ),
@@ -52,6 +54,7 @@ def test_roundtrip(tmp_path):
     assert loaded.settings.perception is False
     assert loaded.settings.throwable is False
     assert loaded.settings.music is False
+    assert loaded.settings.autostart is True
     assert loaded.settings.care_greet is False
     assert loaded.settings.care_eyes is False
     assert loaded.settings.care_water is True

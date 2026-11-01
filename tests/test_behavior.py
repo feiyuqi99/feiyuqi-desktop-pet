@@ -45,6 +45,75 @@ def test_body_click_pokes():
     assert b.drain()[0].event == "click"
 
 
+def test_second_face_poke_pouts():
+    b = Behavior(random.Random(31))
+    b.on_click(DAY, "face")
+    b.drain()
+    b.on_click(DAY + 0.5, "face")
+    b.drain()
+    state = b.tick(ctx(DAY + 0.6))
+    assert state.expression == "pout"
+
+
+def test_second_head_pet_shies():
+    b = Behavior(random.Random(32))
+    b.on_click(DAY, "head")
+    b.drain()
+    b.on_click(DAY + 0.5, "head")
+    b.drain()
+    state = b.tick(ctx(DAY + 0.6))
+    assert state.expression == "shy"
+
+
+def test_second_body_poke_is_confused():
+    b = Behavior(random.Random(33))
+    b.on_click(DAY, "body")
+    b.drain()
+    b.on_click(DAY + 0.5, "body")
+    b.drain()
+    state = b.tick(ctx(DAY + 0.6))
+    assert state.expression == "confused"
+
+
+def test_fast_throw_dizzies():
+    b = Behavior(random.Random(34))
+    b.on_drag_start(DAY)
+    b.drain()
+    b.on_drag_end(DAY + 0.4, speed=2500)
+    state = b.tick(ctx(DAY + 0.5))
+    assert state.expression == "dizzy"
+
+
+def test_long_drag_sweats_before_annoyed():
+    b = Behavior(random.Random(35))
+    b.on_drag_start(DAY)
+    b.drain()
+    state = b.tick(ctx(DAY + 1.0))
+    assert state.expression == "sweat"
+
+
+def test_every_fourth_say_winks():
+    b = Behavior(random.Random(36))
+    for index in range(3):
+        b.say(DAY + index)
+        b.drain()
+        state = b.tick(ctx(DAY + index + 0.1))
+        assert state.expression == "happy"
+    b.say(DAY + 4)
+    b.drain()
+    state = b.tick(ctx(DAY + 4.1))
+    assert state.expression == "wink"
+
+
+def test_express_sets_timed_expression():
+    b = Behavior(random.Random(37))
+    b.express("expect", DAY, 1.5)
+    state = b.tick(ctx(DAY + 0.2))
+    assert state.expression == "expect"
+    state = b.tick(ctx(DAY + 2.0))
+    assert state.expression != "expect"
+
+
 def test_face_click_blushes():
     b = Behavior(random.Random(20))
     b.on_click(DAY, "face")
@@ -182,6 +251,30 @@ def test_drag_hold_struggles():
     assert b.drain() == []
 
 
+def test_music_beat_does_not_lean_her_whole_body():
+    """The beat lives in the layered springs; the global rotation stays a hint."""
+    b = Behavior(random.Random(31))
+    worst = 0.0
+    now = DAY
+    for _ in range(150):
+        now += 0.016
+        state = b.tick(
+            ctx(now, music_active=True, music_energy=1.0, music_tempo=120.0)
+        )
+        worst = max(worst, abs(state.tilt))
+    assert worst <= 0.8
+
+
+def test_squash_ramps_in_instead_of_popping():
+    b = Behavior(random.Random(26))
+    b.start_fall(DAY)
+    b.land(DAY + 1.0)
+    first = b.tick(ctx(DAY + 1.0 + 1 / 60)).squash_y
+    settled = b.tick(ctx(DAY + 1.0 + 0.08)).squash_y
+    assert first > 0.95
+    assert settled < 0.9
+
+
 def test_music_makes_her_sway_with_note():
     b = Behavior(random.Random(11))
     b.tick(
@@ -204,7 +297,8 @@ def test_music_makes_her_sway_with_note():
     )
     assert state.note
     assert state.expression == "sparkle"
-    assert abs(state.tilt) > 0.5
+    assert state.music_energy > 0.5
+    assert state.music_phase != 0.0
 
 
 def test_soft_music_blinks_and_blushes():

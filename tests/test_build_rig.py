@@ -9,9 +9,30 @@ from tools.build_rig import (
     diff_metrics,
     fill_region,
     fill_holes,
+    hand_anchor,
     inpaint_neighbors,
     polygon_mask,
 )
+
+
+def test_hand_anchor_picks_top_cluster():
+    mask = np.zeros((512, 512), dtype=bool)
+    mask[200:300, 100:140] = True
+    mask[196:206, 104:124] = True
+    x, y = hand_anchor(mask)
+    assert 100 <= x <= 140
+    assert 196 <= y <= 215
+
+
+def test_existing_rigs_have_hand_anchor():
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "assets" / "rig"
+    for outfit in ("casual", "maid"):
+        raw = json.loads((root / outfit / "rig.json").read_text(encoding="utf-8"))
+        assert len(raw["hand"]) == 2, outfit
+        assert 0 < raw["hand"][0] < 512 and 0 < raw["hand"][1] < 512, outfit
 
 
 def test_polygon_and_color_masks():

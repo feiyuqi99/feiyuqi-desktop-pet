@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .core import L, Line
+from .actions import ACTION_LINES
 from .companion import COMPANION_LINES
 from .daily import COMPLIMENTS, DAILY_LINES, FOLLOWUPS
 from .interactions import INTERACTION_LINES
@@ -11,6 +12,7 @@ LINES: list[Line] = [
     *DAILY_LINES,
     *COMPANION_LINES,
     *SYSTEM_LINES,
+    *ACTION_LINES,
 ]
 
 

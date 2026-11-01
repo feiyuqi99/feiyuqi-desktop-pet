@@ -6,6 +6,7 @@ from pet.care import Care, CareState
 
 MINUTE = 60.0
 HOUR = 60 * MINUTE
+STEP_SECONDS = 5.0
 
 
 def ts(hour: int, minute: int = 0, second: int = 0, day: int = 5) -> float:
@@ -117,12 +118,29 @@ def test_greeting_comes_before_water_and_delays_it():
     assert events(care, ts(11, 2)) == "care_water"
 
 
-def test_away_resets_the_interval_timers():
-    care = make(ts(9, 0))
-    assert events(care, ts(9, 29), idle=400) is None
-    assert events(care, ts(9, 30), idle=5) is None
-    assert events(care, ts(9, 59), idle=1) is None
-    assert events(care, ts(10, 0), idle=1) == "care_eyes"
+def test_brief_stillness_is_not_a_break():
+    care = make(ts(9, 0), water=False, greet=False)
+    assert events(care, ts(9, 10), idle=400) is None
+    assert events(care, ts(9, 20), idle=500) is None
+    assert events(care, ts(9, 30), idle=300) == "care_eyes"
+
+
+def test_break_pauses_the_timer_instead_of_restarting_it():
+    care = make(ts(9, 0), water=False, greet=False)
+    assert events(care, ts(9, 25), idle=600) is None
+    assert events(care, ts(9, 35), idle=1200) is None
+    assert events(care, ts(9, 36), idle=3) is None
+    assert events(care, ts(9, 49), idle=1) is None
+    assert events(care, ts(9, 50), idle=1) == "care_eyes"
+
+
+def test_long_break_starts_a_fresh_interval():
+    care = make(ts(9, 0), water=False, greet=False)
+    assert events(care, ts(9, 20), idle=700) is None
+    assert events(care, ts(11, 0), idle=7200) is None
+    assert events(care, ts(11, 1), idle=5) is None
+    assert events(care, ts(11, 30), idle=1) is None
+    assert events(care, ts(11, 31), idle=1) == "care_eyes"
 
 
 def test_disabled_care_is_silent():
@@ -171,6 +189,21 @@ def test_yesterdays_state_is_reset():
     assert state.greeted == ["morning"]
     assert state.meals == []
     assert events(care, ts(11, 0)) == "care_noon"
+
+
+def test_reminders_survive_a_real_work_morning():
+    """Nine hours that include ordinary still stretches still deliver eye/water breaks."""
+    care = make(ts(9, 0), greet=False, meal=False)
+    start = ts(9, 0)
+    kinds = []
+    for step in range(int(9 * HOUR / STEP_SECONDS)):
+        now = start + step * STEP_SECONDS
+        cycle = (step * STEP_SECONDS) % (35 * MINUTE)
+        idle = cycle - 20 * MINUTE if cycle > 20 * MINUTE else 15.0
+        alert = tick(care, now, idle)
+        if alert is not None:
+            kinds.append(alert.kind)
+    assert kinds.count("eyes") + kinds.count("both") >= 8
 
 
 CARE_EVENTS = {

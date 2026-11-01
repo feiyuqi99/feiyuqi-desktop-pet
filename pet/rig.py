@@ -32,6 +32,7 @@ class RigSpec:
     feet: tuple[float, float]
     draw_order: tuple[str, ...]
     layers: dict[str, RigLayer]
+    hand: tuple[float, float] = (150.0, 200.0)
 
 
 class RigLibrary:
@@ -72,12 +73,14 @@ class RigLibrary:
                 layers[layer.role] = layer
             if not draw_order or any(role not in layers for role in draw_order):
                 raise ValueError("draw_order references unknown layer")
+            hand_raw = raw.get("hand", [150, 200])
             return RigSpec(
                 outfit=str(raw.get("outfit", outfit)),
                 canvas=canvas,
                 feet=feet,
                 draw_order=draw_order,
                 layers=layers,
+                hand=(float(hand_raw[0]), float(hand_raw[1])),
             )
         except (
             OSError,
@@ -159,6 +162,52 @@ class RigMotion:
             hair_target -= 0.45
         elif expression == "annoyed":
             head_dy_target += 0.2
+        elif expression == "wink":
+            head_dx_target = 0.5
+            head_dy_target += 0.2
+            hair_target += 0.2
+        elif expression == "tears":
+            head_dy_target += 0.6
+            hair_target += 0.5
+        elif expression == "pout":
+            head_dx_target = -0.4
+            head_dy_target += 0.2
+        elif expression == "confused":
+            head_dx_target = 0.8
+            hair_target -= 0.2
+        elif expression == "shy":
+            head_dx_target = -0.7
+            head_dy_target += 0.7
+            hair_target += 0.4
+        elif expression == "dizzy":
+            head_dx_target = math.sin(now * 5.0) * 0.9
+            hair_target += 0.2
+        elif expression == "sweat":
+            head_dy_target += 0.2
+            hair_target -= 0.2
+        elif expression == "expect":
+            head_dy_target -= 0.3
+            hair_target += 0.2
+
+        action = state.action
+        if action == "stretch":
+            head_dy_target -= 0.6
+            hair_target += 0.6
+        elif action == "look":
+            head_dx_target = math.sin(now * 1.7) * 2.0
+            hair_target += math.sin(now * 1.7 - 0.5) * 0.5
+        elif action == "wave":
+            head_dx_target = 0.3
+            hair_target += 0.3
+        elif action == "yawn":
+            head_dy_target += 0.5
+            hair_target += 0.3
+        elif action in ("drink", "eat", "read"):
+            head_dy_target += 0.4
+            hair_target += 0.2
+        elif action == "umbrella":
+            head_dy_target -= 0.3
+            hair_target += 0.2
 
         if state.mode in ("drag", "fall"):
             leg_target = 4.0
@@ -171,32 +220,43 @@ class RigMotion:
 
         energy = max(0.0, min(1.0, state.music_energy))
         if energy > 0.0:
-            hair_target += math.sin(state.music_phase - 0.6) * 0.6 * energy
-            head_dy_target += math.sin(state.music_phase - 0.3) * 0.3 * energy
-            body_target += math.sin(state.music_phase) * 0.35 * energy
+            beat = math.sin(state.music_phase)
+            body_target += beat * 1.1 * energy
+            head_dx_target += -beat * 1.0 * energy
+            head_dy_target += math.sin(state.music_phase - 0.3) * 0.45 * energy
+            hair_target += math.sin(state.music_phase - 0.6) * 1.1 * energy
+            hair_dx_target += math.sin(state.music_phase - 0.9) * 1.0 * energy
         if state.squash_y < 0.95:
             hair_target += 0.8
 
-        self.head_dx.step(dt, head_dx_target, limit=2.5)
+        self.head_dx.step(dt, head_dx_target, limit=3.0)
         self.head_dy.step(dt, head_dy_target, limit=2.0)
-        self.hair_angle.step(dt, hair_target, stiffness=55.0, damping=9.0, limit=1.2)
-        self.hair_dx.step(dt, hair_dx_target, limit=2.0)
-        self.body_angle.step(dt, body_target, stiffness=45.0, damping=10.0, limit=0.8)
+        self.hair_angle.step(dt, hair_target, stiffness=55.0, damping=9.0, limit=1.6)
+        self.hair_dx.step(dt, hair_dx_target, limit=2.5)
+        self.body_angle.step(dt, body_target, stiffness=45.0, damping=10.0, limit=1.6)
         self.leg.step(dt, leg_target, stiffness=60.0, damping=12.0, limit=6.0)
         arm_target = (
             1.0
-            if expression == "sparkle" and state.mode in ("pet", "poke")
+            if (
+                expression == "sparkle"
+                and state.mode in ("pet", "poke")
+            )
+            or state.action in ("stretch", "wave", "umbrella")
             else 0.0
         )
         self.arm.step(dt, arm_target, stiffness=90.0, damping=13.0, limit=1.2)
-        scale_target = 0.96 if expression == "heart" else 1.0
+        scale_target = (
+            0.96 if expression == "heart" else 0.98 if expression == "shy" else 1.0
+        )
         self.head_scale += (scale_target - self.head_scale) * min(1.0, dt * 12.0)
 
 
 class Rig:
     def __init__(self, spec: RigSpec, root: Path) -> None:
         self.spec = spec
+        self.hand = spec.hand
         self.motion = RigMotion()
+        self.base_rotation = 0.0
         self._pixmaps: dict[str, QPixmap] = {}
         folder = Path(root) / spec.outfit
         for layer in spec.layers.values():
@@ -229,7 +289,9 @@ class Rig:
         now: float,
         dt: float,
         overlay,
+        base_rotation: float = 0.0,
     ) -> None:
+        self.base_rotation = base_rotation
         self.motion.update(dt, state, now)
         frame = state.frame if state.frame in ("blink", "happy") else "idle"
         arm = max(0.0, min(1.0, self.motion.arm.value))
@@ -244,7 +306,7 @@ class Rig:
                 opacity = 1.0 - arm
             elif role == "arm_up":
                 opacity = arm
-            self._draw_layer(painter, layer, frame, state, opacity)
+            self._draw_layer(painter, layer, frame, state, opacity, now)
         painter.save()
         painter.scale(DISPLAY_SCALE, DISPLAY_SCALE)
         painter.translate(-SPRITE_FEET_X, -SPRITE_FEET_Y)
@@ -259,6 +321,7 @@ class Rig:
         frame: str,
         state: PetState,
         opacity: float,
+        now: float,
     ) -> None:
         if opacity <= 0.01:
             return
@@ -288,7 +351,11 @@ class Rig:
         elif layer.role == "arm_up":
             dy -= 1.2 * opacity
             angle -= 3.0 * (1.0 - opacity)
+            if state.action == "wave":
+                angle += math.sin(now * 9.0) * 4.0 * opacity
         painter.save()
+        if layer.role == "legs" and self.base_rotation:
+            painter.rotate(-self.base_rotation)
         painter.setOpacity(opacity)
         painter.translate(ax + dx, ay + dy)
         painter.rotate(angle)

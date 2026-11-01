@@ -6,6 +6,8 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 
+from .outfits import available_ids
+
 SPRITE_DIR = Path(__file__).resolve().parent.parent / "assets" / "sprites"
 SPRITE_SIZE = 512
 DISPLAY_SCALE = 0.4
@@ -15,7 +17,7 @@ WINDOW_WIDTH = 248
 WINDOW_HEIGHT = 216
 FEET_X = WINDOW_WIDTH / 2
 
-OUTFITS = ("maid", "casual")
+OUTFITS = available_ids()
 FRAMES = ("idle", "blink", "happy")
 
 HEAD = "head"

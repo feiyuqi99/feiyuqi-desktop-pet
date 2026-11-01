@@ -6,7 +6,7 @@ from datetime import datetime
 EYE_SECONDS = 30 * 60
 WATER_SECONDS = 60 * 60
 MEAL_WINDOW_MINUTES = 45
-AWAY_SECONDS = 5 * 60
+AWAY_SECONDS = 10 * 60
 ALERT_GAP = 90.0
 SLEEP_START = 2
 SLEEP_END = 6
@@ -55,6 +55,7 @@ class Care:
         self.next_eye_at = now + EYE_SECONDS
         self.next_water_at = now + WATER_SECONDS
         self._away = False
+        self._away_for = 0.0
         self._allowed_at = 0.0
         self._roll_day(now)
         band = self._band(now)
@@ -67,11 +68,18 @@ class Care:
         self._roll_day(now)
         if idle_seconds >= AWAY_SECONDS:
             self._away = True
+            self._away_for = max(self._away_for, idle_seconds)
             return None
         if self._away:
+            away_for = self._away_for
             self._away = False
-            self.next_eye_at = now + EYE_SECONDS
-            self.next_water_at = now + WATER_SECONDS
+            self._away_for = 0.0
+            self.next_eye_at = self._resumed(
+                self.next_eye_at, now, away_for, EYE_SECONDS
+            )
+            self.next_water_at = self._resumed(
+                self.next_water_at, now, away_for, WATER_SECONDS
+            )
             return None
         if quiet:
             return None
@@ -132,6 +140,13 @@ class Care:
 
     def set_meal(self, enabled: bool) -> None:
         self.meal_enabled = enabled
+
+    @staticmethod
+    def _resumed(due: float, now: float, away_for: float, interval: float) -> float:
+        """A break does not count toward the interval; a long one starts it over."""
+        if away_for >= interval:
+            return now + interval
+        return due + away_for
 
     def _roll_day(self, now: float) -> None:
         day = datetime.fromtimestamp(now).strftime("%Y-%m-%d")

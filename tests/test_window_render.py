@@ -31,6 +31,18 @@ def opaque_count(image: QImage) -> int:
     )
 
 
+def test_hover_lean_ramps_instead_of_snapping():
+    window = PetWindow(SpriteLibrary())
+    window._hover_target = 2.5
+    rising = [window.step_hover(1 / 30) for _ in range(8)]
+    assert max(abs(b - a) for a, b in zip([0.0] + rising, rising)) < 0.6
+    assert rising[-1] > 1.5
+    window._hover_target = 0.0
+    falling = [window.step_hover(1 / 30) for _ in range(8)]
+    assert max(abs(b - a) for a, b in zip(falling, falling[1:])) < 0.6
+    assert falling[-1] < 0.6
+
+
 def test_maid_and_casual_both_render():
     sprites = SpriteLibrary()
     sprites.preload()

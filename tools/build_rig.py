@@ -32,6 +32,7 @@ class OutfitConfig:
     fill_color: tuple[int, int, int, int] | None
     arm_sleeve_poly: tuple[tuple[int, int], ...] = ()
     legs_poly: tuple[tuple[int, int], ...] = ()
+    arm_geometry_poly: tuple[tuple[int, int], ...] = ()
     anchors: dict[str, tuple[int, int]] = field(
         default_factory=lambda: {
             "legs": (256, 415),
@@ -125,6 +126,36 @@ MAID = OutfitConfig(
 )
 
 CONFIGS = {config.outfit: config for config in (CASUAL, MAID)}
+
+JK = OutfitConfig(
+    outfit="jk",
+    hair_top=240,
+    leg_top=434,
+    legs="silhouette",
+    head_poly=(
+        (126, 30), (398, 30), (400, 220), (370, 255), (315, 265),
+        (280, 250), (260, 265), (240, 250), (205, 265), (140, 250), (120, 220),
+    ),
+    body_poly=(
+        (150, 245), (360, 245), (392, 300), (388, 360), (366, 415),
+        (342, 432), (178, 432), (150, 412), (126, 360), (124, 300),
+    ),
+    arm_down_poly=(
+        (150, 265), (228, 265), (240, 320), (226, 390),
+        (190, 405), (156, 375), (140, 315),
+    ),
+    arm_up_poly=((120, 150), (252, 150), (252, 330), (120, 330)),
+    face_poly=((218, 165), (310, 165), (310, 252), (218, 252)),
+    arm_rule="auto",
+    fill_color=None,
+    legs_poly=((200, 434), (314, 434), (314, 505), (200, 505)),
+    arm_geometry_poly=(
+        (112, 145), (198, 145), (210, 230), (224, 262), (236, 300),
+        (232, 312), (150, 312), (142, 258), (104, 202),
+    ),
+)
+
+CONFIGS[JK.outfit] = JK
 
 
 def polygon_mask(size: tuple[int, int], points: tuple[tuple[int, int], ...]) -> np.ndarray:
@@ -316,14 +347,26 @@ def arm_up_mask(
     region: np.ndarray,
 ) -> np.ndarray:
     alpha = happy[..., 3] > 8
+    if config.arm_rule == "auto":
+        geometry = polygon_mask((CANVAS, CANVAS), config.arm_geometry_poly)
+        core = alpha & ~happy_masks["hair"] & ~happy_masks["dark"] & geometry & region
+        mask = core | (happy_masks["dark"] & dilate(core, 2) & geometry & region)
+        mask = largest_component(fill_holes(mask))
+        return mask & alpha
     if config.arm_rule == "cream":
-        geometry = (
-            ((X < 188) & (Y < 235))
-            | ((X < 198) & (Y >= 235) & (Y < 270))
-            | ((X < 208) & (Y >= 270))
-        )
+        if config.arm_geometry_poly:
+            geometry = polygon_mask((CANVAS, CANVAS), config.arm_geometry_poly)
+        else:
+            geometry = (
+                ((X < 188) & (Y < 235))
+                | ((X < 198) & (Y >= 235) & (Y < 270))
+                | ((X < 208) & (Y >= 270))
+            )
         base = region & alpha & ~happy_masks["hair"] & geometry & happy_masks["cream"]
-        return dilate(base, 2) & region & geometry
+        mask = dilate(base, 2) & region & geometry
+        if config.arm_geometry_poly:
+            mask = largest_component(fill_holes(mask))
+        return mask & alpha
     data = happy.astype(np.int16)
     r, g, b = data[..., 0], data[..., 1], data[..., 2]
     skin = (
@@ -342,6 +385,17 @@ def arm_up_mask(
     mask = fill_holes(mask)
     mask = largest_component(mask)
     return mask & alpha
+
+
+def hand_anchor(mask: np.ndarray) -> tuple[int, int]:
+    ys, xs = np.where(mask)
+    if len(xs) == 0:
+        return (150, 200)
+    top = int(ys.min())
+    bottom = int(ys.max())
+    band = max(4, int((bottom - top) * 0.18))
+    selected = ys <= top + band
+    return (int(round(xs[selected].mean())), int(round(ys[selected].mean())))
 
 
 def build(config: OutfitConfig) -> None:
@@ -403,6 +457,7 @@ def build(config: OutfitConfig) -> None:
         "outfit": config.outfit,
         "canvas": CANVAS,
         "feet": [256, 500],
+        "hand": list(hand_anchor(raised_arm)),
         "draw_order": LAYER_ORDER,
         "layers": {
             role: {

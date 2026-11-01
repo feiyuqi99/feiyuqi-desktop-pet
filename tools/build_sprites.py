@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,16 @@ ALPHA_THRESHOLD = 8
 OUTFITS = {
     "maid": ["idle", "blink", "happy"],
     "casual": ["idle", "blink", "happy"],
+    "jk": ["idle", "happy"],
+    "pajama": ["idle", "happy"],
+    "sport": ["idle", "happy"],
+    "sweater": ["idle", "happy"],
+    "yukata": ["idle", "happy"],
+    "qipao": ["idle", "happy"],
+    "santa": ["idle", "happy"],
+    "raincoat": ["idle", "happy"],
+    "trench": ["idle", "happy"],
+    "witch": ["idle", "happy"],
 }
 
 
@@ -125,24 +136,37 @@ def make_tray_icon(idle: Image.Image) -> None:
 
 def make_preview(images: dict[str, dict[str, Image.Image]]) -> None:
     tile = 180
-    cols, rows = 3, 2
+    cols = 3
+    rows = max(1, len(images))
     sheet = Image.new("RGB", (tile * cols, tile * rows), (236, 233, 224))
     draw = ImageDraw.Draw(sheet)
     for y in range(0, sheet.height, 16):
         for x in range(0, sheet.width, 16):
             if (x // 16 + y // 16) % 2 == 0:
                 draw.rectangle((x, y, x + 15, y + 15), fill=(248, 246, 240))
-    for row, outfit in enumerate(("maid", "casual")):
+    for row, (outfit, frames) in enumerate(images.items()):
         for col, frame in enumerate(("idle", "blink", "happy")):
-            sprite = images[outfit][frame].resize((tile, tile), Image.Resampling.LANCZOS)
+            if frame not in frames:
+                continue
+            sprite = frames[frame].resize((tile, tile), Image.Resampling.LANCZOS)
             sheet.paste(sprite, (col * tile, row * tile), sprite)
     sheet.save(OUT / "preview.png")
 
 
-def main() -> None:
+def main() -> int:
+    names = sys.argv[1:] or [
+        outfit for outfit, frames in OUTFITS.items() if (RAW / f"{outfit}_{frames[0]}.png").is_file()
+    ]
+    unknown = [name for name in names if name not in OUTFITS]
+    if unknown:
+        print(f"unknown outfit: {', '.join(unknown)}")
+        return 2
     OUT.mkdir(parents=True, exist_ok=True)
     all_images: dict[str, dict[str, Image.Image]] = {}
-    for outfit, frames in OUTFITS.items():
+    for outfit in names:
+        frames = [
+            frame for frame in OUTFITS[outfit] if (RAW / f"{outfit}_{frame}.png").is_file()
+        ]
         images = build_outfit(outfit, frames)
         target = OUT / outfit
         target.mkdir(parents=True, exist_ok=True)
@@ -153,11 +177,13 @@ def main() -> None:
             image.save(target / f"{frame}.png")
         all_images[outfit] = images
         print(f"{outfit}: frames={len(images)}")
-    make_tray_icon(all_images["maid"]["idle"])
+    if "maid" in all_images:
+        make_tray_icon(all_images["maid"]["idle"])
     make_preview(all_images)
     print(f"sprites -> {OUT}")
     print(f"icons   -> {ICONS}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .care import CareState
+from .outfits import available_ids
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -16,7 +17,7 @@ CONFIG_PATH = DATA_DIR / "config.json"
 MEMORY_PATH = DATA_DIR / "memory.json"
 LOG_PATH = DATA_DIR / "pet.log"
 
-OUTFITS = ("maid", "casual")
+OUTFITS = available_ids()
 CHATTINESS = ("quiet", "normal", "chatty")
 
 
@@ -29,6 +30,7 @@ class Settings:
     chattiness: str = "normal"
     throwable: bool = True
     music: bool = True
+    autostart: bool = False
     care_greet: bool = True
     care_eyes: bool = True
     care_water: bool = True
@@ -108,6 +110,7 @@ def _load_settings(raw: Any) -> Settings:
         "perception",
         "throwable",
         "music",
+        "autostart",
         "care_greet",
         "care_eyes",
         "care_water",
