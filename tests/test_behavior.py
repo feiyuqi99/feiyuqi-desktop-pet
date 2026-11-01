@@ -3,6 +3,8 @@ from __future__ import annotations
 import random
 from datetime import datetime
 
+import pytest
+
 from pet import behavior
 from pet.behavior import Behavior, BehaviorContext
 from pet.perception import time_band
@@ -265,14 +267,69 @@ def test_music_beat_does_not_lean_her_whole_body():
     assert worst <= 0.8
 
 
-def test_squash_ramps_in_instead_of_popping():
+def test_squash_ramps_in_slowly_and_shallowly():
     b = Behavior(random.Random(26))
     b.start_fall(DAY)
     b.land(DAY + 1.0)
     first = b.tick(ctx(DAY + 1.0 + 1 / 60)).squash_y
-    settled = b.tick(ctx(DAY + 1.0 + 0.08)).squash_y
-    assert first > 0.95
-    assert settled < 0.9
+    peak = b.tick(ctx(DAY + 1.0 + behavior.SQUASH_ATTACK)).squash_y
+    assert first > 0.97
+    assert 0.9 <= peak < 0.93
+
+
+def test_walk_bob_is_a_gentle_sway():
+    b = Behavior(random.Random(7))
+    b.tick(ctx(DAY))
+    b.next_wander = DAY
+    b.next_micro = DAY + 60
+    assert b.tick(ctx(DAY + 0.1)).mode == behavior.WANDER
+    samples = []
+    for index in range(42):
+        state = b.tick(ctx(DAY + 0.2 + index / 21))
+        assert state.mode == behavior.WANDER
+        samples.append(state.bob)
+    assert 1.5 <= max(samples) - min(samples) <= 3.0
+    steps = [abs(a - b) for a, b in zip(samples, samples[1:])]
+    assert max(steps) <= 1.0
+    turns = sum(
+        1 for a, b in zip(samples, samples[1:]) if (a < 0) != (b < 0)
+    )
+    assert turns <= 8
+
+
+def test_drag_hold_bob_is_slow():
+    b = Behavior(random.Random(9))
+    b.on_drag_start(DAY)
+    b.drain()
+    b.set_drag_motion(800.0, -400.0)
+    b.tick(ctx(DAY + 2.0))
+    samples = []
+    for index in range(22):
+        state = b.tick(ctx(DAY + 2.0 + index * 0.05))
+        samples.append(state.bob)
+    assert max(samples) - min(samples) <= 2.4
+    turns = sum(
+        1 for a, c in zip(samples, samples[1:]) if (a < 0) != (c < 0)
+    )
+    assert turns <= 3
+
+
+def test_hop_arc_is_gentle():
+    b = Behavior(random.Random(12))
+    b.on_click(DAY, "feet")
+    assert b.hop_until - b.hop_started == pytest.approx(0.5)
+    state = b.tick(ctx(DAY + 0.45))
+    assert state.hop < -0.5
+
+
+def test_fast_throw_does_not_shake_while_falling():
+    b = Behavior(random.Random(13))
+    b.on_drag_start(DAY)
+    b.drain()
+    b.on_drag_end(DAY + 0.5, speed=2500.0)
+    b.start_fall(DAY + 0.5)
+    tilts = [b.tick(ctx(DAY + 0.5 + index / 21)).tilt for index in range(15)]
+    assert max(abs(value) for value in tilts) <= 0.01
 
 
 def test_music_makes_her_sway_with_note():

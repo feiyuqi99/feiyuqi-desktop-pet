@@ -146,7 +146,6 @@ class RigMotion:
     leg: Spring = field(default_factory=Spring)
     arm: Spring = field(default_factory=Spring)
     breath: float = 0.0
-    breath: float = 0.0
 
     def update(self, dt: float, state: PetState, now: float) -> None:
         breath = math.sin(now * math.tau / 3.6)
@@ -189,7 +188,7 @@ class RigMotion:
             head_dy_target += 0.7
             hair_target += 0.4
         elif expression == "dizzy":
-            body_target += math.sin(now * 5.0) * 0.35
+            body_target += math.sin(now * 2.6) * 0.3
             hair_target += 0.2
         elif expression == "sweat":
             head_dy_target += 0.2

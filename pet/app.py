@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import random
 import sys
 import threading
@@ -38,6 +39,8 @@ from .window import PetWindow
 from .uia import InputScanner
 from . import support
 from . import autostart
+from . import restart
+from . import physics
 
 ROOT = Path(__file__).resolve().parent.parent
 TRAY_ICON = ROOT / "assets" / "icons" / "tray.png"
@@ -374,6 +377,9 @@ class PetApp(QObject):
                 self._save_state()
 
             interval = FLIGHT_MS if self._flying else TICK_MS
+            timer_type = Qt.PreciseTimer if self._flying else Qt.CoarseTimer
+            if self._tick_timer.timerType() != timer_type:
+                self._tick_timer.setTimerType(timer_type)
             if self._tick_timer.interval() != interval:
                 self._tick_timer.setInterval(interval)
         except Exception:
@@ -646,8 +652,7 @@ class PetApp(QObject):
             self._flying = True
             self._grounded = False
             self._input_host = 0
-            self._vx = max(-1800.0, min(1800.0, vx))
-            self._vy = max(-1600.0, min(1600.0, vy))
+            self._vx, self._vy = physics.limit_throw(vx, vy)
             self._fall_target = target
             self.behavior.start_fall(now)
         self._support_check_at = now + 0.4
@@ -701,41 +706,46 @@ class PetApp(QObject):
         dt = min(dt, 0.05)
         x = float(self.window.x())
         y = float(self.window.y())
-
-        if self._vx:
-            x += self._vx * dt
-            left = float(geometry.left())
-            right = float(geometry.right() - self.window.width())
-            if x < left:
-                x = left
-                self._vx = -self._vx * 0.45
-            elif x > right:
-                x = right
-                self._vx = -self._vx * 0.45
-            decay = 5.0 if self._grounded else 0.5
-            self._vx *= max(0.0, 1.0 - decay * dt)
-            if abs(self._vx) < 12.0:
-                self._vx = 0.0
+        left = float(geometry.left())
+        right = float(geometry.right() - self.window.width())
 
         if self._grounded:
+            if self._vx:
+                x += self._vx * dt
+                if x < left:
+                    x = left
+                    self._vx = physics.reflect_wall(self._vx)
+                elif x > right:
+                    x = right
+                    self._vx = physics.reflect_wall(self._vx)
+                self._vx = physics.damp_ground(self._vx, dt)
             lost = False
             if now >= self._support_check_at:
                 self._support_check_at = now + 0.12
                 feet = y + FEET_Y
-                center = int(round(x)) + self.window.width() // 2
-                inputs = self._inputs()
-                top = support.support_at(
-                    center, feet, self._exclude_hwnds(), inputs=inputs
-                )
-                host = support.input_host_at(center, top, inputs) if top is not None else None
-                self._input_host = host or 0
-                if top is None:
-                    lost = True
-                    self._grounded = False
-                    floor_feet = self._feet_floor(geometry)
-                    surface = self._surface_below(feet, floor_feet, inputs)
-                    self._fall_target = floor_feet if surface is None else float(surface)
-                    self.behavior.start_fall(now)
+                floor_feet = self._feet_floor(geometry)
+                if feet >= floor_feet - 2:
+                    self._input_host = 0
+                else:
+                    center = int(round(x)) + self.window.width() // 2
+                    inputs = self._inputs()
+                    top = support.support_at(
+                        center, feet, self._exclude_hwnds(), inputs=inputs
+                    )
+                    host = (
+                        support.input_host_at(center, top, inputs)
+                        if top is not None
+                        else None
+                    )
+                    self._input_host = host or 0
+                    if top is None:
+                        lost = True
+                        self._grounded = False
+                        surface = self._surface_below(feet, floor_feet, inputs)
+                        self._fall_target = (
+                            floor_feet if surface is None else float(surface)
+                        )
+                        self.behavior.start_fall(now)
             if not lost and not self._vx:
                 self._flying = False
                 return
@@ -743,28 +753,29 @@ class PetApp(QObject):
             return
 
         previous = self._vy
-        self._vy = min(1800.0, self._vy + 2400.0 * dt)
+        result = physics.step_flight(
+            x,
+            y,
+            self._vx,
+            self._vy,
+            self._fall_target - FEET_Y,
+            float(geometry.top()),
+            left,
+            right,
+            dt,
+        )
+        x, y = result.x, result.y
+        self._vx, self._vy = result.vx, result.vy
         if previous < 0.0 <= self._vy:
             surface = self._surface_below(y + FEET_Y, self._feet_floor(geometry))
             if surface is not None:
                 self._fall_target = float(surface)
-        y += self._vy * dt
-        if y < geometry.top():
-            y = geometry.top()
-            self._vy = -self._vy * 0.35
-        target_y = self._fall_target - FEET_Y
-        if y >= target_y and self._vy > 0:
-            y = target_y
-            if self._vy > 520.0:
-                self._vy = -self._vy * 0.32
-                self.behavior.bounce(now)
-            else:
-                self._vy = 0.0
-                self._grounded = True
-                self.behavior.land(now)
-                self._support_check_at = now + 0.12
-                if not self._vx:
-                    self._flying = False
+        if result.landed:
+            self._grounded = True
+            self.behavior.land(now)
+            self._support_check_at = now + 0.12
+            if not self._vx:
+                self._flying = False
         self.window.move(int(round(x)), int(round(y)))
 
     def _check_support(self, now: float, geometry) -> None:
@@ -979,6 +990,8 @@ class PetApp(QObject):
         action = menu.addAction("隐藏" if self.window.isVisible() else "显示")
         action.setData("toggle")
         action.triggered.connect(self._toggle_visibility)
+        action = menu.addAction("重启")
+        action.triggered.connect(self._restart)
         action = menu.addAction("先去睡了")
         action.triggered.connect(self._exit)
 
@@ -1096,7 +1109,7 @@ class PetApp(QObject):
             "maid": "outfit_maid",
             "casual": "outfit_casual",
         }.get(outfit, "outfit_change")
-        self.behavior.express("wink", time.time(), 1.4)
+        self.behavior.express("sparkle", time.time(), 1.4)
         self._speak(event, self._context(time.time()), force=True)
         self._save_state()
 
@@ -1280,6 +1293,15 @@ class PetApp(QObject):
         self.tray.hide()
         self.qt_app.quit()
 
+    def _restart(self) -> None:
+        self._save_state_sync()
+        if not restart.spawn(os.getpid()):
+            return
+        self.bubble.hide()
+        self.window.hide()
+        self.tray.hide()
+        self.qt_app.quit()
+
 
 def configure_logging() -> None:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -1291,8 +1313,21 @@ def configure_logging() -> None:
     )
 
 
+def _parse_wait_pid(argv: list[str]) -> int | None:
+    for index, arg in enumerate(argv):
+        if arg == "--wait-pid" and index + 1 < len(argv):
+            try:
+                return int(argv[index + 1])
+            except ValueError:
+                return None
+    return None
+
+
 def main() -> int:
     configure_logging()
+    wait_pid = _parse_wait_pid(sys.argv)
+    if wait_pid is not None:
+        restart.wait_for_exit(wait_pid)
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )

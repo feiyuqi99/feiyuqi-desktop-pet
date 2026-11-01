@@ -19,7 +19,7 @@ SLEEP = "sleep"
 FALL = "fall"
 ACTION = "action"
 
-SQUASH_ATTACK = 0.08
+SQUASH_ATTACK = 0.22
 MUSIC_LEAN_BASE = 0.35
 MUSIC_LEAN_ENERGY = 0.35
 
@@ -218,7 +218,7 @@ class Behavior:
 
     def _hop(self, now: float, height: float = 9.0) -> None:
         self.hop_started = now
-        self.hop_until = now + 0.42
+        self.hop_until = now + 0.5
         self.hop_height = height
 
     def _wake(self, ctx: BehaviorContext, greeting: str = "wake") -> None:
@@ -348,19 +348,15 @@ class Behavior:
         self.last_input = now
         self.poke_times.clear()
         self.hop_until = 0.0
+        self.wobble_until = 0.0
         self.wander_pause_until = 0.0
         self._set_expression("surprised", now + 3.0)
-
-    def bounce(self, now: float) -> None:
-        self.squash_started_at = now
-        self.squash_until = now + 0.2
-        self._set_expression("surprised", now + 0.5)
 
     def land(self, now: float) -> None:
         self.mode = IDLE
         self.mode_until = 0.0
         self.squash_started_at = now
-        self.squash_until = now + 0.32
+        self.squash_until = now + 0.65
         self.next_wander = now + self.rng.uniform(30, 90)
         self._set_expression("surprised", now + 0.6)
         if self.rng.random() < 0.35:
@@ -513,13 +509,13 @@ class Behavior:
 
         drag_held = now - self.drag_started_at if self.mode == DRAG else 0.0
         if self.mode == DRAG:
-            bob = math.sin(now * math.tau * 2.2) * 1.8 if drag_held > 1.6 else 0.0
+            bob = math.sin(now * math.tau * 1.15) * 1.2 if drag_held > 1.6 else 0.0
         elif self.mode == FALL:
             bob = 0.0
         elif self.mode in (SLEEP, NAP):
             bob = math.sin(now * math.tau / 6.0) * 1.2
         elif self.mode == WANDER:
-            bob = math.sin(now * math.tau * 3.0) * 2.0
+            bob = math.sin(now * math.tau * 1.5) * 1.3
         else:
             bob = math.sin(now * math.tau / 3.6) * 2.5
 
@@ -530,7 +526,7 @@ class Behavior:
         if self.mode == DRAG:
             tilt = self.drag_tilt
             if drag_held > 1.6:
-                tilt += math.sin(now * math.tau * 2.4) * 2.2
+                tilt += math.sin(now * math.tau * 1.2) * 1.6
                 if not self.drag_holder_notified and drag_held > 2.4:
                     self.drag_holder_notified = True
                     self._queue("drag_hold")
@@ -550,9 +546,9 @@ class Behavior:
             tilt += math.sin(self.music_phase) * (
                 MUSIC_LEAN_BASE + MUSIC_LEAN_ENERGY * ctx.music_energy
             )
-        if now < self.wobble_until:
+        if now < self.wobble_until and self.mode != FALL:
             fade = min(1.0, (self.wobble_until - now) / 0.25)
-            tilt += math.sin(now * math.tau * 3.0) * 2.5 * fade
+            tilt += math.sin(now * math.tau * 2.0) * 2.5 * fade
 
         scale = 1.03 if now < self.stretch_until else 1.0 + 0.004 * math.sin(now * math.tau / 3.6)
         if self.micro_kind == "yawn":
@@ -608,15 +604,15 @@ class Behavior:
             recover = max(0.0, total - SQUASH_ATTACK)
             decay = max(0.0, 1.0 - max(0.0, elapsed - SQUASH_ATTACK) / recover)
             ease = attack * decay
-            squash_y = 1.0 - 0.14 * ease
-            squash_x = 1.0 + 0.09 * ease
+            squash_y = 1.0 - 0.09 * ease
+            squash_x = 1.0 + 0.05 * ease
 
         if self.mode == DRAG:
             drag_stretch = max(0.0, min(0.12, abs(self.drag_vy) / 4000.0))
             squash_y = 1.0 + drag_stretch
             squash_x = 1.0 - drag_stretch * 0.5
             if drag_held > 1.6:
-                pulse = 0.012 * math.sin(now * math.tau * 5.0)
+                pulse = 0.008 * math.sin(now * math.tau * 1.6)
                 squash_y += pulse
                 squash_x -= pulse * 0.5
 
