@@ -157,6 +157,63 @@ JK = OutfitConfig(
 
 CONFIGS[JK.outfit] = JK
 
+# 新装扮共用：同姿势，头/身体/垂手/脸部多边形与 JK 一致
+_NEW_COMMON = dict(
+    hair_top=240,
+    head_poly=JK.head_poly,
+    body_poly=JK.body_poly,
+    arm_down_poly=JK.arm_down_poly,
+    arm_up_poly=JK.arm_up_poly,
+    face_poly=JK.face_poly,
+    fill_color=None,
+)
+ARM_GEOMETRY = (
+    (100, 142), (192, 142), (204, 205), (214, 242), (226, 272),
+    (242, 332), (148, 332), (138, 262), (92, 205),
+)
+LONG_SLEEVE_POLY = (
+    (138, 212), (250, 212), (250, 332), (138, 332),
+)
+
+
+def _legs(top: int, left: int = 195, right: int = 325) -> tuple[tuple[int, int], ...]:
+    return ((left, top), (right, top), (right, 505), (left, 505))
+
+
+def _new(
+    outfit: str,
+    leg_top: int,
+    arm_rule: str = "auto",
+    arm_sleeve_poly: tuple[tuple[int, int], ...] = (),
+    legs_left: int = 195,
+    legs_right: int = 325,
+) -> OutfitConfig:
+    return OutfitConfig(
+        outfit=outfit,
+        legs="silhouette",
+        leg_top=leg_top,
+        legs_poly=_legs(leg_top, legs_left, legs_right),
+        arm_rule=arm_rule,
+        arm_sleeve_poly=arm_sleeve_poly,
+        arm_geometry_poly=ARM_GEOMETRY if arm_rule == "auto" else (),
+        **_NEW_COMMON,
+    )
+
+
+EXTRA = [
+    _new("pajama", 385),
+    _new("sport", 395, arm_rule="skin", arm_sleeve_poly=LONG_SLEEVE_POLY),
+    _new("sweater", 443),
+    _new("yukata", 475),
+    _new("qipao", 470, arm_rule="skin", arm_sleeve_poly=((185, 245), (242, 245), (242, 315), (185, 315))),
+    _new("santa", 442),
+    _new("raincoat", 458),
+    _new("trench", 445),
+    _new("witch", 445, arm_rule="skin", arm_sleeve_poly=LONG_SLEEVE_POLY),
+]
+for _config in EXTRA:
+    CONFIGS[_config.outfit] = _config
+
 
 def polygon_mask(size: tuple[int, int], points: tuple[tuple[int, int], ...]) -> np.ndarray:
     image = Image.new("L", size, 0)
