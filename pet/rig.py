@@ -14,6 +14,7 @@ from .behavior import PetState
 
 RIG_DIR = Path(__file__).resolve().parent.parent / "assets" / "rig"
 SLOT = QRectF(-DRAW_SIZE / 2, -FEET_Y, DRAW_SIZE, DRAW_SIZE)
+HEAD_FOLLOW = 0.5
 
 
 @dataclass(frozen=True)
@@ -127,22 +128,30 @@ class Spring:
         return self.value
 
 
+@dataclass(frozen=True)
+class LayerPose:
+    dx: float = 0.0
+    dy: float = 0.0
+    angle: float = 0.0
+    scale_y: float = 1.0
+    pivot: tuple[float, float] = (0.0, 0.0)
+
+
 @dataclass
 class RigMotion:
-    head_dx: Spring = field(default_factory=Spring)
     head_dy: Spring = field(default_factory=Spring)
     hair_angle: Spring = field(default_factory=Spring)
     hair_dx: Spring = field(default_factory=Spring)
     body_angle: Spring = field(default_factory=Spring)
     leg: Spring = field(default_factory=Spring)
     arm: Spring = field(default_factory=Spring)
-    head_scale: float = 1.0
+    breath: float = 0.0
     breath: float = 0.0
 
     def update(self, dt: float, state: PetState, now: float) -> None:
         breath = math.sin(now * math.tau / 3.6)
         self.breath = breath
-        head_dx_target = 0.0
+        # The head rides on the torso, so these are whole-upper-body offsets.
         head_dy_target = 0.35 * breath
         hair_target = -0.35 * breath
         hair_dx_target = 0.0
@@ -154,7 +163,7 @@ class RigMotion:
             head_dy_target += 0.8
             hair_target += 0.7
         elif expression == "blush":
-            head_dx_target = -0.9
+            body_target -= 0.35
             head_dy_target += 0.25
             hair_target += 0.35
         elif expression == "surprised":
@@ -163,24 +172,24 @@ class RigMotion:
         elif expression == "annoyed":
             head_dy_target += 0.2
         elif expression == "wink":
-            head_dx_target = 0.5
+            body_target += 0.2
             head_dy_target += 0.2
             hair_target += 0.2
         elif expression == "tears":
             head_dy_target += 0.6
             hair_target += 0.5
         elif expression == "pout":
-            head_dx_target = -0.4
+            body_target -= 0.15
             head_dy_target += 0.2
         elif expression == "confused":
-            head_dx_target = 0.8
+            body_target += 0.3
             hair_target -= 0.2
         elif expression == "shy":
-            head_dx_target = -0.7
+            body_target -= 0.25
             head_dy_target += 0.7
             hair_target += 0.4
         elif expression == "dizzy":
-            head_dx_target = math.sin(now * 5.0) * 0.9
+            body_target += math.sin(now * 5.0) * 0.35
             hair_target += 0.2
         elif expression == "sweat":
             head_dy_target += 0.2
@@ -194,10 +203,10 @@ class RigMotion:
             head_dy_target -= 0.6
             hair_target += 0.6
         elif action == "look":
-            head_dx_target = math.sin(now * 1.7) * 2.0
+            body_target += math.sin(now * 1.7) * 0.7
             hair_target += math.sin(now * 1.7 - 0.5) * 0.5
         elif action == "wave":
-            head_dx_target = 0.3
+            body_target += 0.12
             hair_target += 0.3
         elif action == "yawn":
             head_dy_target += 0.5
@@ -211,25 +220,23 @@ class RigMotion:
 
         if state.mode in ("drag", "fall"):
             leg_target = 4.0
-            head_dx_target += max(-1.2, min(1.2, -state.tilt * 0.15))
+            body_target += max(-0.5, min(0.5, -state.tilt * 0.06))
             hair_target += max(-0.9, min(0.9, state.tilt * 0.12))
         elif state.move_speed:
             lean = max(-0.7, min(0.7, state.move_speed * 0.01))
             hair_dx_target = -lean * 1.2
-            body_target = lean
+            body_target += lean
 
         energy = max(0.0, min(1.0, state.music_energy))
         if energy > 0.0:
             beat = math.sin(state.music_phase)
             body_target += beat * 1.1 * energy
-            head_dx_target += -beat * 1.0 * energy
             head_dy_target += math.sin(state.music_phase - 0.3) * 0.45 * energy
             hair_target += math.sin(state.music_phase - 0.6) * 1.1 * energy
             hair_dx_target += math.sin(state.music_phase - 0.9) * 1.0 * energy
         if state.squash_y < 0.95:
             hair_target += 0.8
 
-        self.head_dx.step(dt, head_dx_target, limit=3.0)
         self.head_dy.step(dt, head_dy_target, limit=2.0)
         self.hair_angle.step(dt, hair_target, stiffness=55.0, damping=9.0, limit=1.6)
         self.hair_dx.step(dt, hair_dx_target, limit=2.5)
@@ -245,10 +252,6 @@ class RigMotion:
             else 0.0
         )
         self.arm.step(dt, arm_target, stiffness=90.0, damping=13.0, limit=1.2)
-        scale_target = (
-            0.96 if expression == "heart" else 0.98 if expression == "shy" else 1.0
-        )
-        self.head_scale += (scale_target - self.head_scale) * min(1.0, dt * 12.0)
 
 
 class Rig:
@@ -308,11 +311,53 @@ class Rig:
                 opacity = arm
             self._draw_layer(painter, layer, frame, state, opacity, now)
         painter.save()
+        pivot_x, pivot_y = self._body_pivot()
+        painter.translate(pivot_x, pivot_y + self.motion.head_dy.value * HEAD_FOLLOW)
+        painter.rotate(self.motion.body_angle.value)
+        painter.scale(1.0, 1.0 + 0.006 * self.motion.breath)
+        painter.translate(-pivot_x, -pivot_y)
         painter.scale(DISPLAY_SCALE, DISPLAY_SCALE)
         painter.translate(-SPRITE_FEET_X, -SPRITE_FEET_Y)
         painter.setOpacity(1.0)
         overlay(painter)
         painter.restore()
+
+    def _body_pivot(self) -> tuple[float, float]:
+        body = self.spec.layers.get("body")
+        if body is None:
+            return (0.0, 0.0)
+        return self._anchor(body)
+
+    def pose(self, layer: RigLayer, state: PetState) -> LayerPose:
+        ax, ay = self._anchor(layer)
+        dx = (layer.depth - 0.8) * state.tilt * 0.35
+        dy = 0.0
+        angle = 0.0
+        scale_y = 1.0
+        pivot = (ax, ay)
+        body = self.motion.body_angle.value
+        breath = 1.0 + 0.006 * self.motion.breath
+        role = layer.role
+        if role == "head" or role == "body":
+            dy += self.motion.head_dy.value * HEAD_FOLLOW
+            angle += body
+            scale_y *= breath
+            if role == "head":
+                pivot = self._body_pivot()
+        elif role == "left_arm":
+            dy += self.motion.head_dy.value * HEAD_FOLLOW
+            angle += body
+            scale_y *= breath
+            pivot = self._body_pivot()
+        elif role == "side_hair":
+            dx += self.motion.hair_dx.value
+            dy += self.motion.head_dy.value * 0.35
+            angle += self.motion.hair_angle.value + body * 0.5
+        elif role == "legs":
+            angle += self.motion.leg.value
+        elif role == "arm_up":
+            angle += body
+        return LayerPose(dx, dy, angle, scale_y, pivot)
 
     def _draw_layer(
         self,
@@ -326,40 +371,22 @@ class Rig:
         if opacity <= 0.01:
             return
         pixmap = self._pixmap(layer, frame)
-        ax, ay = self._anchor(layer)
-        dx = (layer.depth - 0.8) * state.tilt * 0.35
-        dy = 0.0
-        angle = 0.0
-        scale_x = 1.0
-        scale_y = 1.0
-        if layer.role == "head":
-            dx += self.motion.head_dx.value
-            dy += self.motion.head_dy.value
-            scale_y *= self.motion.head_scale
-        elif layer.role == "side_hair":
-            dx += self.motion.hair_dx.value
-            dy += self.motion.head_dy.value * 0.3
-            angle += self.motion.hair_angle.value
-        elif layer.role == "body":
-            dy += self.motion.head_dy.value * 0.15
-            angle += self.motion.body_angle.value
-            scale_y *= 1.0 + 0.006 * self.motion.breath
-        elif layer.role == "legs":
-            angle += self.motion.leg.value
-        elif layer.role == "left_arm":
-            angle += self.motion.body_angle.value * 0.5
-        elif layer.role == "arm_up":
+        pose = self.pose(layer, state)
+        dy = pose.dy
+        angle = pose.angle
+        if layer.role == "arm_up":
             dy -= 1.2 * opacity
             angle -= 3.0 * (1.0 - opacity)
             if state.action == "wave":
                 angle += math.sin(now * 9.0) * 4.0 * opacity
+        pivot_x, pivot_y = pose.pivot
         painter.save()
         if layer.role == "legs" and self.base_rotation:
             painter.rotate(-self.base_rotation)
         painter.setOpacity(opacity)
-        painter.translate(ax + dx, ay + dy)
+        painter.translate(pivot_x + pose.dx, pivot_y + dy)
         painter.rotate(angle)
-        painter.scale(scale_x, scale_y)
-        painter.translate(-ax, -ay)
+        painter.scale(1.0, pose.scale_y)
+        painter.translate(-pivot_x, -pivot_y)
         painter.drawPixmap(SLOT, pixmap, pixmap.rect())
         painter.restore()

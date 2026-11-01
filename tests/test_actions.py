@@ -95,12 +95,12 @@ def test_umbrella_raises_arm_but_held_props_stay_down():
         assert motion.arm.value < 0.1, kind
 
 
-def test_look_action_moves_head():
+def test_look_action_turns_the_upper_body():
     motion = RigMotion()
     state = PetState(mode="action", action="look")
     for index in range(20):
         motion.update(0.05, state, index * 0.05)
-    assert abs(motion.head_dx.value) > 0.2
+    assert abs(motion.body_angle.value) > 0.2
 
 
 def test_props_and_action_overlays_are_visible():

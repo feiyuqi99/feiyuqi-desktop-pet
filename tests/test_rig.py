@@ -8,6 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from pathlib import Path
 
+import pytest
 from PIL import Image, ImageDraw
 import numpy as np
 from PySide6.QtGui import QImage, QPainter
@@ -140,16 +141,15 @@ def test_head_pet_presses_head_and_hair():
     motion = RigMotion()
     advance(motion, PetState(mode="pet", expression="heart"), 1.0)
     assert motion.head_dy.value > 0.3
-    assert motion.head_scale < 0.99
     assert motion.hair_angle.value > 0.5
 
 
-def test_face_poke_recoils_then_returns():
+def test_face_poke_leans_the_torso_then_returns():
     motion = RigMotion()
     advance(motion, PetState(mode="poke", expression="blush"), 0.6)
-    assert abs(motion.head_dx.value) > 0.4
+    assert abs(motion.body_angle.value) > 0.15
     advance(motion, PetState(mode="idle", expression="neutral"), 2.0, start=200.0)
-    assert abs(motion.head_dx.value) < 0.15
+    assert abs(motion.body_angle.value) < 0.06
 
 
 def test_high_five_raises_arm_and_relaxes():
@@ -187,20 +187,19 @@ def test_dragging_makes_legs_dangle():
     assert abs(motion.hair_angle.value) <= 1.2
 
 
-def test_beat_moves_torso_and_head_in_opposition():
-    """A groove reads as hips leading and head countering, not a board lean."""
-    body = []
-    head = []
-    for step in range(24):
-        phase = step * math.tau / 24
-        state = PetState(mode="idle", music_phase=phase, music_energy=1.0)
-        motion = RigMotion()
-        advance(motion, state, 1.2)
-        body.append(motion.body_angle.value)
-        head.append(motion.head_dx.value)
-    assert max(abs(v) for v in body) > 0.6
-    assert max(abs(v) for v in head) > 0.4
-    assert any(b * h < 0 for b, h in zip(body, head))
+def test_head_is_rigid_with_the_torso():
+    """The head rides on the torso: same rotation, same pivot, no sideways drift."""
+    rig = RigLibrary().get("maid")
+    state = PetState(mode="idle", music_phase=math.pi / 2, music_energy=1.0)
+    for step in range(45):
+        rig.motion.update(1 / 30, state, step * 0.033)
+    assert abs(rig.motion.body_angle.value) > 0.5
+    head = rig.pose(rig.spec.layers["head"], state)
+    body = rig.pose(rig.spec.layers["body"], state)
+    assert head.angle == pytest.approx(body.angle)
+    assert head.pivot == body.pivot
+    assert head.dx == pytest.approx(0.0)
+    assert head.scale_y == pytest.approx(body.scale_y)
 
 
 def test_legs_stay_vertical_when_the_body_leans(tmp_path):
